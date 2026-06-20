@@ -1,0 +1,1 @@
+-- MySQL deploy_records.status has no CHECK constraint; no rollback is required.

@@ -1,0 +1,1 @@
+-- MySQL release_events.actor_type has no CHECK constraint; no schema change is required.

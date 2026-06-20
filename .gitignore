@@ -1,0 +1,7 @@
+.cache/
+data/
+web/dist/
+web/node_modules/
+web/*.tsbuildinfo
+web/*.js
+web/*.d.ts

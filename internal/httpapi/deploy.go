@@ -1,0 +1,74 @@
+package httpapi
+
+import (
+	"net/http"
+
+	"ai-pub/internal/repository"
+)
+
+func listDeployRecords(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
+			return
+		}
+		items, err := store.ListDeployRecords(r.Context())
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, items)
+	}
+}
+
+func getDeployRecord(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
+			return
+		}
+		item, err := store.GetDeployRecord(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, item)
+	}
+}
+
+func listServerDeployLogs(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
+			return
+		}
+		items, err := store.ListServerDeployLogs(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, items)
+	}
+}
+
+func listServerDeploymentStates(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
+			return
+		}
+		items, err := store.ListServerDeploymentStates(r.Context())
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, items)
+	}
+}
+
+func opsSummary(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		item, err := store.OpsSummary(r.Context())
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, item)
+	}
+}

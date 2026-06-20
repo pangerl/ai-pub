@@ -1,0 +1,351 @@
+# API 设计
+
+## 1. 目标
+
+第一版 API 使用 REST 风格和 `/api/v1` 前缀，为 Web 前端、CI/CD、后续 AI Agent 和 OpenAPI 提供统一接口基础。
+
+## 2. 非目标
+
+- 不设计运行中紧急停止接口。
+- 不设计复杂批量编排接口。
+- 不展开 Agent 专用复杂 API；Agent 薄封装放到 `agent-integration-design.md`。
+- 不兼容旧系统接口。
+
+## 3. 通用约定
+
+### 3.1 路径前缀
+
+```text
+/api/v1
+```
+
+下文接口路径均省略 `/api/v1` 前缀；例如 `/projects` 的完整路径是 `/api/v1/projects`。
+
+### 3.2 响应结构
+
+成功：
+
+```json
+{
+  "data": {},
+  "request_id": "req_xxx"
+}
+```
+
+失败：
+
+```json
+{
+  "error": {
+    "code": "invalid_state",
+    "message": "当前发布单状态不允许确认",
+    "details": {}
+  },
+  "request_id": "req_xxx"
+}
+```
+
+### 3.3 分页
+
+列表接口支持：
+
+- `limit`
+- `cursor`
+- `sort`
+
+长期增长资源必须支持稳定排序：
+
+- 发布单
+- 发布记录
+- 服务器日志
+- 审计事件
+
+### 3.4 幂等键
+
+写接口可通过 header 或字段传入幂等键：
+
+```text
+Idempotency-Key: xxx
+```
+
+要求：
+
+- 创建发布单必须支持幂等键。
+- 自动化调用确认、取消、创建回滚等状态变更接口时，也应支持幂等键或等价重复提交保护。
+- 幂等键命中时返回首次请求结果。
+
+## 4. 鉴权与调用身份
+
+调用身份：
+
+- `user`
+- `service_account`
+- `ai_agent`
+- `system`
+
+认证方式：
+
+- Web 用户：登录会话或 JWT。
+- 自动化调用：API Key。
+
+API Key scope：
+
+| scope | 说明 |
+|------|------|
+| `release:read` | 读取发布单、发布记录、日志 |
+| `release:create` | 创建发布单和 preflight |
+| `release:confirm` | 确认、驳回、取消发布单 |
+| `release:rollback` | 创建回滚发布单 |
+| `deploy:read` | 读取执行状态和服务器日志 |
+| `admin:write` | 管理基础配置和高风险配置 |
+
+约束：
+
+- API Key 即使具备 `release:confirm`，也不能绕过生产管理员确认。
+- 所有触发真实发布的 API 必须进入统一发布流程。
+
+## 5. 错误码
+
+| code | 说明 |
+|------|------|
+| `unauthorized` | 未认证 |
+| `forbidden` | 无权限 |
+| `not_found` | 资源不存在 |
+| `invalid_argument` | 参数错误 |
+| `invalid_state` | 状态不允许 |
+| `preflight_blocked` | preflight 阻断 |
+| `conflict` | 幂等或唯一约束冲突 |
+| `executor_error` | 执行器错误 |
+| `internal_error` | 系统错误 |
+
+## 6. 认证、用户和 API Key
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/auth/login` | 登录 |
+| `GET` | `/me` | 当前用户 |
+| `GET` | `/users` | 用户列表，管理员 |
+| `POST` | `/users` | 创建用户，管理员 |
+| `PATCH` | `/users/{id}` | 更新用户，管理员 |
+| `GET` | `/api-keys` | API Key 列表 |
+| `POST` | `/api-keys` | 创建 API Key |
+| `PATCH` | `/api-keys/{id}` | 禁用或更新 |
+| `DELETE` | `/api-keys/{id}` | 删除 |
+
+API Key 创建响应只返回一次明文。
+
+## 7. 基础配置 API
+
+### 7.1 项目
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/projects` | 列表 |
+| `POST` | `/projects` | 创建 |
+| `GET` | `/projects/{id}` | 详情 |
+| `PATCH` | `/projects/{id}` | 更新 |
+
+### 7.2 服务和版本
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/services` | 服务列表 |
+| `POST` | `/services` | 创建服务 |
+| `GET` | `/services/{id}` | 服务详情 |
+| `PATCH` | `/services/{id}` | 更新服务 |
+| `GET` | `/services/{id}/versions` | 版本列表 |
+| `POST` | `/services/{id}/versions` | 注册版本 |
+
+### 7.3 环境、服务器和部署目标
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/environments` | 环境列表 |
+| `POST` | `/environments` | 创建环境 |
+| `GET` | `/servers` | 服务器列表 |
+| `POST` | `/servers` | 创建服务器 |
+| `POST` | `/servers/{id}/test-connection` | 测试 SSH 连接 |
+| `GET` | `/server-groups` | 服务器组列表 |
+| `POST` | `/server-groups` | 创建服务器组 |
+| `GET` | `/deployment-targets` | 部署目标列表 |
+| `POST` | `/deployment-targets` | 创建部署目标 |
+| `PATCH` | `/deployment-targets/{id}` | 更新部署目标 |
+
+## 8. 发布流程 API
+
+### 8.1 创建发布单
+
+```text
+POST /release-requests
+```
+
+约束：
+
+- 创建发布单前，客户端应先调用 preflight。
+- 创建发布单时，服务端必须基于同一套策略和关键 preflight 规则再次校验。
+- preflight 为 `block` 时不得创建真实发布单。
+
+请求：
+
+```json
+{
+  "service_id": "svc_1",
+  "environment_id": "env_test",
+  "service_version_id": "ver_1",
+  "deployment_target_id": "target_1",
+  "reason": "",
+  "risk_note": "",
+  "rollback_note": "",
+  "metadata": {}
+}
+```
+
+响应：
+
+```json
+{
+  "data": {
+    "id": "rel_1",
+    "status": "pending_confirm",
+    "next_action": "self_confirm"
+  }
+}
+```
+
+### 8.2 Preflight
+
+```text
+POST /release-requests/preflight
+POST /release-requests/{id}/preflight
+```
+
+响应：
+
+```json
+{
+  "data": {
+    "result": "pass",
+    "items": [
+      {
+        "code": "target_ready",
+        "level": "pass",
+        "message": "部署目标配置完整"
+      }
+    ]
+  }
+}
+```
+
+结果：
+
+- `pass`
+- `warning`
+- `block`
+
+### 8.3 查询发布单
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/release-requests` | 列表 |
+| `GET` | `/release-requests/{id}` | 详情 |
+
+列表筛选：
+
+- `status`
+- `service_id`
+- `environment_id`
+- `source`
+- `created_by`
+
+### 8.4 确认、驳回、取消
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/release-requests/{id}/confirm` | 确认并入队 |
+| `POST` | `/release-requests/{id}/reject` | 驳回 |
+| `POST` | `/release-requests/{id}/cancel` | 取消 queued 前发布 |
+
+约束：
+
+- 确认时必须再次执行关键 preflight。
+- 生产发布必须管理员确认。
+- running 后取消返回当前运行状态，不提供紧急停止。
+
+### 8.5 回滚
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/release-requests/{id}/rollback-candidates` | 推荐回滚版本 |
+| `POST` | `/release-requests/{id}/rollback` | 创建回滚发布单 |
+
+回滚发布单复用同一套 preflight、策略、确认、审计流程。
+
+## 9. 发布记录和日志 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/deploy-records` | 发布记录列表 |
+| `GET` | `/deploy-records/{id}` | 发布记录详情 |
+| `GET` | `/deploy-records/{id}/server-logs` | 服务器日志 |
+| `GET` | `/server-deployment-states` | 当前运行版本视图 |
+
+## 10. 策略和冻结 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/release-policies` | 策略列表 |
+| `PUT` | `/release-policies/{id}` | 更新策略 |
+| `POST` | `/release-policies/effective` | 查询最终生效策略 |
+| `POST` | `/release-policies/freeze` | 打开冻结 |
+| `POST` | `/release-policies/unfreeze` | 关闭冻结 |
+
+## 11. 通知配置 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/notification-configs` | 通知配置列表 |
+| `POST` | `/notification-configs` | 创建企业微信机器人 webhook |
+| `PATCH` | `/notification-configs/{id}` | 更新 |
+| `POST` | `/notification-configs/{id}/test` | 测试发送 |
+| `GET` | `/notification-deliveries` | 发送记录 |
+
+## 12. 运维接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/healthz` | 健康检查 |
+| `GET` | `/ops/summary` | 运行摘要 |
+| `GET` | `/ops/migrations` | migration 状态 |
+| `GET` | `/ops/metrics` | 指标 |
+
+运维接口不得泄漏密钥和敏感配置。
+
+## 13. Agent API 边界
+
+第一版 API 只为 Agent 预留：
+
+- 调用身份 `ai_agent`。
+- 审计字段。
+- 幂等键。
+- OpenAPI 友好的业务 API。
+
+详细 Agent 薄封装放到 `agent-integration-design.md`。
+
+## 14. OpenAPI 要求
+
+OpenAPI 必须覆盖：
+
+- 认证方式。
+- 请求和响应 schema。
+- 分页字段。
+- 错误码。
+- 幂等键 header。
+- 关键状态枚举。
+- scope 要求。
+
+## 15. 验证要求
+
+- Web 前端可只依赖 API 文档完成发布闭环。
+- 每个关键写接口都有鉴权、幂等和事件写入说明。
+- OpenAPI 可生成基础 API client。
+- API 不包含运行中紧急停止入口。

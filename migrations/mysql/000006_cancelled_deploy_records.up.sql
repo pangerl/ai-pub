@@ -1,0 +1,1 @@
+-- MySQL deploy_records.status has no CHECK constraint; no schema change is required.

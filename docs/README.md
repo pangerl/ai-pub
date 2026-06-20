@@ -1,0 +1,24 @@
+# 发布系统技术文档索引
+
+本文档目录用于承接 `project-requirements.md` 和 `technical-docs-breakdown.md`，指导后续开发实现。
+
+建议阅读顺序：
+
+1. `domain-model-design.md`：领域模型、表结构、状态机和事件模型。
+2. `backend-architecture-design.md`：Go 后端分层、事务边界、Worker 和执行器 contract。
+3. `api-design.md`：REST API、鉴权、幂等、OpenAPI 和 Agent API 边界。
+4. `frontend-ia-design.md`：React 最小管理界面的页面、状态和交互。
+5. `engineering-scaffold-design.md`：目录结构、配置、migration、测试和本地 demo。
+6. `notification-design.md`：企业微信机器人 webhook 通知和渠道扩展点。
+7. `development-plan.md`：开发阶段、交付物和验证命令。
+8. `development-completion-audit.md`：当前开发完成审查、已验证范围和暂缓项。
+9. `agent-integration-design.md`：AI Agent 后置接入方案。
+
+第一版实现时应始终遵守：
+
+- MySQL 8 是开发、验收和生产环境的唯一运行数据库。
+- 第一版优先功能闭环，不考虑高并发、多实例 Worker、复杂 RBAC、多租户和运行中紧急停止。
+- 审计只要求关键动作可追溯、可查询，不设计不可篡改账本。
+- 企业微信通知使用机器人 webhook，不做企业微信应用消息。
+
+当前容器化验收范围见 `development-completion-audit.md` 和 `local-verification.md`。

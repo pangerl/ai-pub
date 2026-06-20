@@ -1,0 +1,17 @@
+FROM golang:1.26.2 AS api-build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY migrations ./migrations
+RUN CGO_ENABLED=0 go build -o /out/ai-pub ./cmd/server
+
+FROM debian:bookworm-slim AS api
+
+WORKDIR /app
+COPY --from=api-build /out/ai-pub /app/ai-pub
+COPY --from=api-build /src/migrations /app/migrations
+EXPOSE 8080
+ENTRYPOINT ["/app/ai-pub"]

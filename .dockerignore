@@ -1,0 +1,8 @@
+.git
+.cache
+data
+web/node_modules
+web/dist
+web/*.js
+web/*.d.ts
+web/*.tsbuildinfo

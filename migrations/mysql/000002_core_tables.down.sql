@@ -1,0 +1,16 @@
+DROP TABLE IF EXISTS notification_deliveries;
+DROP TABLE IF EXISTS notification_configs;
+DROP TABLE IF EXISTS release_events;
+DROP TABLE IF EXISTS server_deployment_states;
+DROP TABLE IF EXISTS server_deploy_logs;
+DROP TABLE IF EXISTS deploy_records;
+DROP TABLE IF EXISTS release_requests;
+DROP TABLE IF EXISTS release_policies;
+DROP TABLE IF EXISTS deployment_targets;
+DROP TABLE IF EXISTS server_group_members;
+DROP TABLE IF EXISTS server_groups;
+DROP TABLE IF EXISTS servers;
+DROP TABLE IF EXISTS service_versions;
+DROP TABLE IF EXISTS services;
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS service_accounts;

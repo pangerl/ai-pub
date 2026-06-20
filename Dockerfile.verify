@@ -1,0 +1,6 @@
+FROM python:3.13-alpine
+
+RUN apk add --no-cache bash curl
+
+WORKDIR /app
+COPY scripts/local-functional-check.sh /app/scripts/local-functional-check.sh
