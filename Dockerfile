@@ -11,6 +11,9 @@ RUN CGO_ENABLED=0 go build -o /out/ai-pub ./cmd/server
 FROM debian:bookworm-slim AS api
 
 WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssh-client \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=api-build /out/ai-pub /app/ai-pub
 COPY --from=api-build /src/migrations /app/migrations
 EXPOSE 8080

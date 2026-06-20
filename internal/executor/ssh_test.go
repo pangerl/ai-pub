@@ -2,6 +2,9 @@ package executor
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"ai-pub/internal/domain"
@@ -16,17 +19,28 @@ func (f fakeCredentialResolver) Secret(context.Context, string) (repository.Cred
 	return f.secret, nil
 }
 
-func TestSSHExecutorPasswordIsExplicitlyUnsupportedForCommandBackend(t *testing.T) {
+func TestSSHExecutorPasswordUsesAskpassWithoutLeakingSecret(t *testing.T) {
+	sshPath := filepath.Join(t.TempDir(), "ssh")
+	if err := os.WriteFile(sshPath, []byte(`#!/bin/sh
+set -eu
+test "$SSH_ASKPASS_REQUIRE" = force
+test "$("$SSH_ASKPASS")" = "$AI_PUB_SSH_ASKPASS_PASSWORD"
+printf 'password authentication succeeded\n'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	exec := SSH{Credentials: fakeCredentialResolver{secret: repository.CredentialSecret{
 		Credential: domain.Credential{Type: "password"},
 		Secret:     "top-secret",
-	}}}
+	}}, Command: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, sshPath, args...)
+	}}
 	result := exec.Execute(context.Background(), Request{
 		Target: domain.DeploymentTarget{ScriptPath: "echo ok", TimeoutSeconds: 1},
-		Server: domain.Server{AuthType: "password", CredentialRef: "cred_1"},
+		Server: domain.Server{Host: "example.test", Port: 22, Username: "deploy", AuthType: "password", CredentialRef: "cred_1"},
 	})
-	if result.Status != "failed" || result.ErrorCode != "auth_failed" {
-		t.Fatalf("expected auth_failed, got %#v", result)
+	if result.Status != "success" || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("expected successful password authentication, got %#v", result)
 	}
 	if result.ErrorMessage == "top-secret" || result.LogOutput == "top-secret" {
 		t.Fatalf("secret leaked in result %#v", result)

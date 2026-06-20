@@ -905,6 +905,7 @@ export function App() {
                       <div>
                         <Typography.Title level={5}>服务器</Typography.Title>
                         <ServerForm
+                          credentials={state.credentials}
                           onDone={(server) => {
                             setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') });
                             void refreshAll();
@@ -1333,9 +1334,10 @@ function EnvironmentForm({ onDone }: { onDone: (environment: Entity) => void }) 
   );
 }
 
-function ServerForm({ onDone }: { onDone: (server: Entity) => void }) {
+function ServerForm({ credentials, onDone }: { credentials: Entity[]; onDone: (server: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const authType = Form.useWatch('auth_type', form);
   async function submit(values: Entity) {
     setLoading(true);
     try {
@@ -1368,11 +1370,16 @@ function ServerForm({ onDone }: { onDone: (server: Entity) => void }) {
           options={[
             { label: 'none', value: 'none' },
             { label: 'private_key', value: 'private_key' },
+            { label: 'password', value: 'password' },
           ]}
         />
       </Form.Item>
-      <Form.Item name="credential_ref" label="Credential Ref">
-        <Input />
+      <Form.Item
+        name="credential_ref"
+        label="凭据"
+        rules={authType === 'none' ? [] : [{ required: true, message: '请选择凭据' }]}
+      >
+        <Select allowClear options={credentials.map(entityOption)} disabled={authType === 'none'} />
       </Form.Item>
       <Button type="primary" htmlType="submit" loading={loading}>
         创建服务器

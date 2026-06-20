@@ -84,6 +84,7 @@ type CredentialResolver interface {
 
 type SSH struct {
 	Credentials CredentialResolver
+	Command     func(context.Context, string, ...string) *exec.Cmd
 }
 
 func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
@@ -99,10 +100,7 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
-	if req.Server.AuthType == "password" {
-		return failedResult(start, "auth_failed", "password ssh execution requires an interactive askpass helper and is not enabled", nil)
-	}
-	keyPath, cleanup, err := privateKeyFile(req.Server.AuthType, secret)
+	args, commandEnv, cleanup, err := sshAuth(req.Server.AuthType, secret)
 	if err != nil {
 		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
 	}
@@ -114,22 +112,18 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	args := []string{
-		"-o", "BatchMode=yes",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
+	args = append(args,
+		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", fmt.Sprintf("ConnectTimeout=%d", int(timeout.Seconds())),
 		"-p", fmt.Sprintf("%d", req.Server.Port),
-	}
-	if keyPath != "" {
-		args = append(args, "-i", keyPath)
-	}
+	)
 	args = append(args, req.Server.Username+"@"+req.Server.Host, command)
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := s.command(ctx, args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Env = append(os.Environ(), commandEnv...)
 	for key, value := range executionEnv(req) {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
@@ -178,6 +172,57 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 		DurationMS: int(time.Since(start).Milliseconds()),
 		LogOutput:  output,
 	}
+}
+
+func (s SSH) command(ctx context.Context, args ...string) *exec.Cmd {
+	if s.Command != nil {
+		return s.Command(ctx, "ssh", args...)
+	}
+	return exec.CommandContext(ctx, "ssh", args...)
+}
+
+func sshAuth(authType string, secret repository.CredentialSecret) ([]string, []string, func(), error) {
+	switch authType {
+	case "private_key":
+		keyPath, cleanup, err := privateKeyFile(authType, secret)
+		if err != nil {
+			return nil, nil, func() {}, err
+		}
+		return []string{"-o", "BatchMode=yes", "-i", keyPath}, nil, cleanup, nil
+	case "password":
+		if secret.Credential.Type != "password" {
+			return nil, nil, func() {}, fmt.Errorf("credential type mismatch")
+		}
+		askpassPath, cleanup, err := askpassHelper()
+		if err != nil {
+			return nil, nil, func() {}, err
+		}
+		return []string{
+				"-o", "BatchMode=no",
+				"-o", "NumberOfPasswordPrompts=1",
+				"-o", "PreferredAuthentications=password,keyboard-interactive",
+			}, []string{
+				"SSH_ASKPASS=" + askpassPath,
+				"SSH_ASKPASS_REQUIRE=force",
+				"DISPLAY=ai-pub",
+				"AI_PUB_SSH_ASKPASS_PASSWORD=" + secret.Secret,
+			}, cleanup, nil
+	default:
+		return nil, nil, func() {}, fmt.Errorf("unsupported ssh auth type %q", authType)
+	}
+}
+
+func askpassHelper() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "ai-pub-ssh-askpass-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path := filepath.Join(dir, "askpass")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' \"$AI_PUB_SSH_ASKPASS_PASSWORD\"\n"), 0o700); err != nil {
+		os.RemoveAll(dir)
+		return "", func() {}, err
+	}
+	return path, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 func privateKeyFile(authType string, secret repository.CredentialSecret) (string, func(), error) {

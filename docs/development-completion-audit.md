@@ -8,7 +8,7 @@
 
 本轮已通过 `make verify` 与 `make local-check`。后者从空 MySQL 数据库自动迁移并覆盖 Mock 发布的驳回、取消、成功、服务器组、partial/skipped、失败、回滚、日志和事件流。
 
-浏览器人工验收已按 `local-verification.md` 启动：前端容器在 Compose 网络内返回 HTTP 200；但当前 Codex 内置浏览器对 `127.0.0.1:18080` 和 `localhost:18080` 均在请求前报 `ERR_BLOCKED_BY_CLIENT`，没有进入应用页面。该限制属于本次验收自动化运行环境，不是应用运行或接口缺陷；宿主机人工浏览器可按清单补做同一 UI 路径。
+浏览器人工验收已完成。验收中发现 `127.0.0.1:18080` 被本项目遗留的宿主机 Go 服务进程占用，导致页面返回后端 404；停止该进程并重建 `web` 容器后，地址恢复为 Nginx `200 OK`。随后在浏览器中完成初始化 Mock 配置、创建发布单、确认入队、等待执行成功、进入发布记录并查看服务器日志；成功发布记录显示 `success`，服务器日志显示对应 Mock 服务器为 `success`。
 
 ## 已完成
 
@@ -18,11 +18,11 @@
 | Web/API 发布闭环 | 已完成 | `make local-check` |
 | 前端容器 | 已完成 | Nginx 提供 SPA 并反向代理 `/api`、`/healthz` |
 | Go 单元测试与前端构建 | 已完成 | `make verify` |
+| 真实 SSH 密码发布 | 已完成 | 非生产测试服务器先验证连接和脚本可执行性，再执行 `/home/dm/service/deploy.sh`；两次发布均为 success，实际脚本退出码为 0 |
 | PostgreSQL | 未实现 | 仅保留 repository/migration 扩展边界，不承诺当前支持 |
 
 ## 外部集成专项待启动
 
-- 真实 SSH 服务器发布与密码登录。
 - 真实企业微信机器人 webhook 发送。
 - PostgreSQL 方言与 migration（非外部集成，但也不属于本地 MVP）。
 - 高并发、多实例 Worker、复杂 RBAC、多租户和运行中紧急停止。
