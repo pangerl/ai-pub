@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -39,6 +40,19 @@ func (s WeComRobot) Send(ctx context.Context, webhookURL string, content string)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("wecom webhook returned %d", resp.StatusCode)
+	}
+	var result struct {
+		ErrCode *int   `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return fmt.Errorf("invalid wecom webhook response: %w", err)
+	}
+	if result.ErrCode == nil {
+		return fmt.Errorf("invalid wecom webhook response: errcode is required")
+	}
+	if *result.ErrCode != 0 {
+		return fmt.Errorf("wecom webhook error %d: %s", *result.ErrCode, result.ErrMsg)
 	}
 	return nil
 }

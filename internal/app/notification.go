@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"ai-pub/internal/crypto"
@@ -163,6 +164,9 @@ func (s NotificationService) decryptSecret(config repository.NotificationSecret)
 
 func (s NotificationService) sendOne(ctx context.Context, config repository.NotificationSecret, event NotificationEvent) (domain.NotificationDelivery, error) {
 	err := s.sender.Send(ctx, config.WebhookURL, event.Content)
+	if err != nil {
+		err = errors.New(sanitizeNotificationError(err.Error(), config.WebhookURL, config.Secret))
+	}
 	delivery := domain.NotificationDelivery{
 		ConfigID:         config.Config.ID,
 		EventType:        event.EventType,
@@ -188,6 +192,15 @@ func (s NotificationService) sendOne(ctx context.Context, config repository.Noti
 	}
 	s.recordDeliveryEvent(ctx, saved)
 	return saved, nil
+}
+
+func sanitizeNotificationError(message string, webhookURL string, secret string) string {
+	for _, value := range []string{webhookURL, secret} {
+		if value != "" {
+			message = strings.ReplaceAll(message, value, "[redacted]")
+		}
+	}
+	return message
 }
 
 func (s NotificationService) recordDeliveryEvent(ctx context.Context, delivery domain.NotificationDelivery) {

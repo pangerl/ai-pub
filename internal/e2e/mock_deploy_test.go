@@ -277,7 +277,7 @@ func TestSQLiteMockDeployFailureSendsNotification(t *testing.T) {
 		calls++
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("{}")),
+			Body:       io.NopCloser(strings.NewReader(`{"errcode":0,"errmsg":"ok"}`)),
 			Header:     make(http.Header),
 		}, nil
 	})}

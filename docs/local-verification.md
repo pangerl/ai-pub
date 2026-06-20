@@ -87,7 +87,11 @@ curl -X POST http://127.0.0.1:18080/api/v1/release-requests \
 
 API Key 读取发布单、事件和回滚候选需要 `release:read`，发布前 preflight 和创建发布单需要 `release:create`，创建发布单会记录创建时的 `preflight_checked` 事件，已有发布单 preflight 需要 `release:read` 并会再次写入 `preflight_checked` 事件，确认、驳回、取消发布单需要 `release:confirm`，创建回滚单需要 `release:rollback`，读取部署记录和服务器日志需要 `deploy:read`，管理基础配置、API Key、凭据、通知和发布策略需要 `admin:write`。用户禁用后不能确认发布；通过 API Key 创建、确认、驳回、取消或回滚发布单时，事件流会记录 `api_key_id`；禁用、过期或 scope 不足会被拒绝。
 
-通知链路的本地验证以 `go test ./internal/app ./internal/httpapi ./internal/e2e` 为准，覆盖通知配置创建、启用/禁用、发送记录、生产待管理员确认通知、发布失败通知触发入口、回滚申请通知触发入口，以及通知发送成功/失败写入发布事件流。真实企业微信 webhook 发送仍属于外部集成验证。
+通知链路的本地验证以 `go test ./internal/app ./internal/httpapi ./internal/e2e` 为准，覆盖通知配置创建、启用/禁用、发送记录、生产待管理员确认通知、发布失败通知触发入口、回滚申请通知触发入口，以及通知发送成功/失败写入发布事件流。
+
+## 真实企业微信机器人专项验收
+
+已使用真实企业微信机器人 webhook 创建加密通知配置并执行测试发送。企业微信响应被校验为 `errcode=0`，本地 `notification_test` 投递记录为 `sent`。运行镜像包含 `ca-certificates`，TLS 校验失败时错误文本会脱敏 webhook URL。
 
 ## 真实 SSH 专项验收
 
@@ -95,8 +99,4 @@ API Key 读取发布单、事件和回滚候选需要 `release:read`，发布前
 
 专项配置使用 `password` 类型凭据并由凭据服务加密保存；不得将真实密码写入版本库、发布目标环境变量、日志或审计事件。
 
-## 当前不验证
-
-- 真实企业微信 webhook 发送。
-
-真实企业微信 webhook 属于后续专项验证；MySQL 8 容器下的 Mock 发布闭环必须稳定可重复。
+MySQL 8 容器下的 Mock 发布闭环必须稳定可重复。

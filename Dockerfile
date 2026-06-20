@@ -12,7 +12,7 @@ FROM debian:bookworm-slim AS api
 
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client \
+  && apt-get install -y --no-install-recommends ca-certificates openssh-client \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=api-build /out/ai-pub /app/ai-pub
 COPY --from=api-build /src/migrations /app/migrations

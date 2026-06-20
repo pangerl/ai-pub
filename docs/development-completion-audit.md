@@ -19,11 +19,11 @@
 | 前端容器 | 已完成 | Nginx 提供 SPA 并反向代理 `/api`、`/healthz` |
 | Go 单元测试与前端构建 | 已完成 | `make verify` |
 | 真实 SSH 密码发布 | 已完成 | 非生产测试服务器先验证连接和脚本可执行性，再执行 `/home/dm/service/deploy.sh`；两次发布均为 success，实际脚本退出码为 0 |
+| 真实企业微信机器人 webhook | 已完成 | 测试发送返回 success，`notification_test` 投递记录为 sent；TLS 失败信息不暴露 webhook URL |
 | PostgreSQL | 未实现 | 仅保留 repository/migration 扩展边界，不承诺当前支持 |
 
-## 外部集成专项待启动
+## 后续优化
 
-- 真实企业微信机器人 webhook 发送。
 - PostgreSQL 方言与 migration（非外部集成，但也不属于本地 MVP）。
 - 高并发、多实例 Worker、复杂 RBAC、多租户和运行中紧急停止。
 

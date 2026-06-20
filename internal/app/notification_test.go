@@ -19,7 +19,7 @@ func TestNotificationServiceSendsAndRecordsDelivery(t *testing.T) {
 		calls++
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("{}")),
+			Body:       io.NopCloser(strings.NewReader(`{"errcode":0,"errmsg":"ok"}`)),
 			Header:     make(http.Header),
 		}, nil
 	})}
@@ -70,7 +70,7 @@ func TestNotificationServiceRecordsReleaseEvents(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("{}")),
+			Body:       io.NopCloser(strings.NewReader(`{"errcode":0,"errmsg":"ok"}`)),
 			Header:     make(http.Header),
 		}, nil
 	})}
