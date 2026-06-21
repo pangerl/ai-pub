@@ -187,7 +187,7 @@ POST /release-requests
 约束：
 
 - 创建发布单前，客户端应先调用 preflight。
-- 创建发布单时，服务端必须基于同一套策略和关键 preflight 规则再次校验。
+- 创建发布单时，服务端必须基于环境发布保护和关键 preflight 规则再次校验。
 - preflight 为 `block` 时不得创建真实发布单。
 
 请求：
@@ -285,7 +285,7 @@ POST /release-requests/{id}/preflight
 | `POST` | `/release-requests/{id}/rollback` | 创建回滚发布单 |
 | `GET` | `/release-requests/{id}/events` | 发布事件 |
 
-回滚发布单复用同一套 preflight、策略、确认、审计流程。
+回滚发布单复用同一套 preflight、环境发布保护、确认、审计流程。
 
 ## 9. 发布记录和日志 API
 
@@ -296,15 +296,9 @@ POST /release-requests/{id}/preflight
 | `GET` | `/deploy-records/{id}/server-logs` | 服务器日志 |
 | `GET` | `/server-deployment-states` | 当前运行版本视图 |
 
-## 10. 策略和冻结 API
+## 10. 环境发布保护 API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/release-policies` | 策略列表 |
-| `POST` | `/release-policies` | 创建或更新策略 |
-| `GET` | `/release-policies/effective?service_id={id}&environment_id={id}` | 查询最终生效策略 |
-| `POST` | `/release-policies/freeze` | 打开冻结 |
-| `POST` | `/release-policies/unfreeze` | 关闭冻结 |
+通过管理员接口 `PATCH /environments/{id}` 更新 `release_frozen`。环境响应同时返回 `is_production` 和 `release_frozen`；不提供独立策略或冻结 API。
 
 ## 11. 通知配置 API
 

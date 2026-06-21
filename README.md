@@ -18,16 +18,15 @@
 - Bearer API Key 支持读取基础库存、发布单和部署记录，并分别校验 `inventory:read`、`release:read`、`deploy:read` scope。
 - Bearer API Key 支持创建、确认和回滚非生产发布单，并校验 `release:create`、`release:confirm`、`release:rollback` scope；生产确认必须使用管理员会话。
 - Bearer API Key 支持发布前 preflight、驳回和取消，并分别校验 `release:create`、`release:confirm` scope。
-- Bearer API Key 管理基础配置、API Key、凭据、通知和发布策略时校验 `admin:write` scope。
+- Bearer API Key 管理基础配置、API Key、凭据和通知时校验 `admin:write` scope。
 - API Key 调用写入发布事件 `api_key_id` 审计字段。
 - 发布单幂等键重复提交返回首次发布单，关键字段变化返回 409 冲突。
 - 发布单 preflight、创建、确认入队、驳回和取消。
 - 发布单确认和取消重复提交会返回当前状态，不重复创建执行记录或事件。
 - Preflight 对缺少制品地址的版本给出 warning，并阻断覆盖 `AI_PUB_*` 系统变量的部署目标。
 - 已入队发布取消时同步取消发布记录，避免取消后仍显示为 queued。
-- 系统/环境/服务发布策略读取、保存、生效策略查询和冻结开关；第一版不提供 SSH 实时检查策略。
-- 非生产本人确认、生产管理员确认、冻结阻断、运行中发布阻断。
-- 冻结策略会阻断新发布，并暂停已 queued 发布被 Worker 领取。
+- 非生产本人确认、生产管理员确认、环境冻结阻断、运行中发布阻断。
+- 环境冻结会阻断新发布，并暂停该环境已 queued 发布被 Worker 领取。
 - 发布单关键动作审计事件，包括已有发布单预检、确认、驳回、取消、执行、回滚和通知投递结果。
 - Mock/Dry-run 执行器。
 - Mock/Dry-run 和 SSH 执行器注入标准发布环境变量，包括版本号、commit 和制品地址。
@@ -46,7 +45,7 @@
 - 运维摘要 `/ops/summary`。
 - 前端支持初始化 Mock 配置、创建发布单、预检、确认入队、驳回、取消、创建回滚单、模拟失败发布。
 - 前端支持发布前预检结果展示。
-- 前端支持手动创建项目、服务、版本、环境、服务器、发布目标、确认用户、发布策略、通知配置、凭据、访问密钥和发布日志查看。
+- 前端支持手动创建项目、服务、版本、环境、服务器、发布目标、确认用户、环境发布保护、通知配置、凭据、访问密钥和发布日志查看。
 - 前端支持创建服务器组，并使用 `server_group` 作为发布目标。
 - 前端支持通知测试和通知投递查看。
 - 前端以当前登录用户作为发布创建、确认、驳回、取消和回滚的操作者，不再允许通过页面切换确认身份。
@@ -119,11 +118,6 @@ make compose-down
 - `GET /release-requests/{id}/rollback-candidates`
 - `POST /release-requests/{id}/rollback`
 - `POST /release-requests/{id}/retry`
-- `GET /release-policies`
-- `POST /release-policies`
-- `GET /release-policies/effective`
-- `POST /release-policies/freeze`
-- `POST /release-policies/unfreeze`
 - `GET /deploy-records`
 - `GET /deploy-records/{id}`
 - `GET /deploy-records/{id}/server-logs`

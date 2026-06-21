@@ -94,13 +94,6 @@ type RetryInput struct {
 	APIKeyID       string `json:"api_key_id"`
 }
 
-type PolicyInput struct {
-	ScopeType           string `json:"scope_type"`
-	ScopeID             string `json:"scope_id"`
-	ConfirmMode         string `json:"confirm_mode"`
-	ManualFreezeEnabled bool   `json:"manual_freeze_enabled"`
-}
-
 var ErrPreflightBlocked = errors.New("preflight blocked")
 var ErrIdempotencyConflict = errors.New("idempotency key conflict")
 
@@ -131,12 +124,10 @@ func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (Pr
 		NextAction:  "self_confirm",
 		Items:       []PreflightItem{},
 	}
-	policy, err := s.effectivePolicy(ctx, env, input.ServiceID)
-	if err != nil {
-		return PreflightResult{}, err
+	if env.IsProduction {
+		result.ConfirmMode = "admin_confirm"
+		result.NextAction = "admin_confirm"
 	}
-	result.ConfirmMode = policy.ConfirmMode
-	result.NextAction = policy.ConfirmMode
 
 	if version.ServiceID != input.ServiceID {
 		result.block("version_service_mismatch", "版本不属于目标服务")
@@ -154,8 +145,8 @@ func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (Pr
 			Message: "版本未配置制品地址，部署脚本需要自行根据版本号解析制品",
 		})
 	}
-	if policy.ManualFreezeEnabled {
-		result.block("manual_freeze", "当前策略已冻结发布")
+	if env.ReleaseFrozen {
+		result.block("environment_frozen", "当前环境已冻结发布")
 	}
 	running, err := s.store.CountRunningReleases(ctx, input.ServiceID, input.EnvironmentID)
 	if err != nil {
@@ -317,7 +308,7 @@ func (s ReleaseService) Confirm(ctx context.Context, id string, input ConfirmInp
 		return domain.ReleaseRequest{}, err
 	}
 	if preflight.Result == "block" {
-		return domain.ReleaseRequest{}, errors.New("preflight blocked")
+		return domain.ReleaseRequest{}, ErrPreflightBlocked
 	}
 	actor := input.actor()
 	confirmedByUserID := ""
@@ -555,68 +546,6 @@ func (s ReleaseService) Retry(ctx context.Context, releaseID string, input Retry
 		Message:          "重新发布单已创建",
 	})
 	return item, preflight, nil
-}
-
-func (s ReleaseService) ListPolicies(ctx context.Context) ([]domain.ReleasePolicy, error) {
-	return s.store.ListReleasePolicies(ctx)
-}
-
-func (s ReleaseService) SavePolicy(ctx context.Context, input PolicyInput) (domain.ReleasePolicy, error) {
-	if input.ScopeType == "" {
-		input.ScopeType = "system"
-	}
-	if input.ConfirmMode == "" {
-		input.ConfirmMode = "self_confirm"
-	}
-	return s.store.UpsertReleasePolicy(ctx, domain.ReleasePolicy{
-		ScopeType:           input.ScopeType,
-		ScopeID:             input.ScopeID,
-		ConfirmMode:         input.ConfirmMode,
-		ManualFreezeEnabled: input.ManualFreezeEnabled,
-	})
-}
-
-func (s ReleaseService) SetFreeze(ctx context.Context, scopeType string, scopeID string, enabled bool) (domain.ReleasePolicy, error) {
-	if scopeType == "" {
-		scopeType = "system"
-	}
-	policy, err := s.store.GetReleasePolicy(ctx, scopeType, scopeID)
-	if err != nil {
-		if !errors.Is(err, repository.ErrNotFound) {
-			return domain.ReleasePolicy{}, err
-		}
-		policy = domain.ReleasePolicy{ScopeType: scopeType, ScopeID: scopeID, ConfirmMode: "self_confirm"}
-	}
-	policy.ManualFreezeEnabled = enabled
-	return s.store.UpsertReleasePolicy(ctx, policy)
-}
-
-func (s ReleaseService) EffectivePolicy(ctx context.Context, serviceID string, environmentID string) (domain.ReleasePolicy, error) {
-	env, err := s.store.GetEnvironment(ctx, environmentID)
-	if err != nil {
-		return domain.ReleasePolicy{}, err
-	}
-	return s.effectivePolicy(ctx, env, serviceID)
-}
-
-func (s ReleaseService) effectivePolicy(ctx context.Context, env domain.Environment, serviceID string) (domain.ReleasePolicy, error) {
-	policy, err := s.store.GetReleasePolicy(ctx, "system", "")
-	if err != nil {
-		return domain.ReleasePolicy{}, err
-	}
-	if envPolicy, err := s.store.GetReleasePolicy(ctx, "environment", env.ID); err == nil {
-		policy = envPolicy
-	}
-	if servicePolicy, err := s.store.GetReleasePolicy(ctx, "service", serviceID); err == nil {
-		policy = servicePolicy
-	}
-	if env.IsProduction {
-		policy.ConfirmMode = "admin_confirm"
-	}
-	if policy.ConfirmMode == "" {
-		return domain.ReleasePolicy{}, fmt.Errorf("release policy confirm mode is empty")
-	}
-	return policy, nil
 }
 
 func (r *PreflightResult) block(code string, message string) {

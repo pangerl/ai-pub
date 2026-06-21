@@ -39,11 +39,13 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"is_production": false,
 	})
 	patchedEnvironment := patchForData(t, router, "/api/v1/environments/"+env["id"].(string), map[string]any{
-		"name": "测试环境（已更新）",
+		"name":           "测试环境（已更新）",
+		"release_frozen": true,
 	})
-	if patchedEnvironment["name"] != "测试环境（已更新）" {
+	if patchedEnvironment["name"] != "测试环境（已更新）" || patchedEnvironment["release_frozen"] != true {
 		t.Fatalf("expected patched environment, got %#v", patchedEnvironment)
 	}
+	patchForData(t, router, "/api/v1/environments/"+env["id"].(string), map[string]any{"release_frozen": false})
 	server := postForData(t, router, "/api/v1/servers", map[string]any{
 		"name":      "mock-1",
 		"host":      "127.0.0.1",

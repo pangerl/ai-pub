@@ -23,6 +23,7 @@ CREATE TABLE environments (
   name VARCHAR(255) NOT NULL,
   slug VARCHAR(255) NOT NULL UNIQUE,
   is_production TINYINT(1) NOT NULL DEFAULT 0,
+  release_frozen TINYINT(1) NOT NULL DEFAULT 0,
   enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at VARCHAR(64) NOT NULL,
   updated_at VARCHAR(64) NOT NULL

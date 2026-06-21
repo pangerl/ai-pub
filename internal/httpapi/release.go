@@ -142,6 +142,10 @@ func confirmRelease(service app.ReleaseService, store repository.Store) http.Han
 		}
 		item, err := service.Confirm(r.Context(), r.PathValue("id"), input)
 		if err != nil {
+			if errors.Is(err, app.ErrPreflightBlocked) {
+				writeError(w, r, http.StatusConflict, "preflight_blocked", err)
+				return
+			}
 			writeError(w, r, http.StatusBadRequest, "invalid_state", err)
 			return
 		}
@@ -314,60 +318,5 @@ func listReleaseEvents(service app.ReleaseService, store repository.Store) http.
 			return
 		}
 		writeData(w, r, http.StatusOK, items)
-	}
-}
-
-func listReleasePolicies(service app.ReleaseService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		items, err := service.ListPolicies(r.Context())
-		if err != nil {
-			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
-			return
-		}
-		writeData(w, r, http.StatusOK, items)
-	}
-}
-
-func getEffectiveReleasePolicy(service app.ReleaseService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		item, err := service.EffectivePolicy(r.Context(), r.URL.Query().Get("service_id"), r.URL.Query().Get("environment_id"))
-		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
-			return
-		}
-		writeData(w, r, http.StatusOK, item)
-	}
-}
-
-func saveReleasePolicy(service app.ReleaseService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var input app.PolicyInput
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		item, err := service.SavePolicy(r.Context(), input)
-		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
-			return
-		}
-		writeData(w, r, http.StatusOK, item)
-	}
-}
-
-func freezeReleasePolicy(service app.ReleaseService, enabled bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var input struct {
-			ScopeType string `json:"scope_type"`
-			ScopeID   string `json:"scope_id"`
-		}
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		item, err := service.SetFreeze(r.Context(), input.ScopeType, input.ScopeID, enabled)
-		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
-			return
-		}
-		writeData(w, r, http.StatusOK, item)
 	}
 }

@@ -33,7 +33,6 @@ ReleaseRequest 1 -- n ReleaseEvent
 DeployRecord 1 -- n ServerDeployLog
 Service + Environment + Server 1 -- 1 ServerDeploymentState
 
-ReleasePolicy belongs to system / environment / service
 ApiKey belongs to User
 NotificationConfig 1 -- n NotificationDelivery
 ```
@@ -156,12 +155,15 @@ NotificationConfig 1 -- n NotificationDelivery
 | `name` | 展示名 |
 | `slug` | 唯一标识 |
 | `is_production` | 是否生产环境 |
+| `release_frozen` | 是否冻结该环境的发布 |
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
 约束：
 
 - 生产判断必须依赖 `is_production`，不能依赖 tag 文本。
+- 生产环境固定要求管理员确认；非生产环境固定由发起人本人确认。
+- `release_frozen` 为环境唯一的发布冻结来源，不做系统或服务级覆盖。
 
 ### 4.7 Server
 
@@ -233,31 +235,13 @@ NotificationConfig 1 -- n NotificationDelivery
 - 第一版运行目标只实现服务器和服务器组。
 - `(service_id, environment_id)` 可以有多个部署目标，但创建发布单时必须选择明确目标。
 
-### 4.10 ReleasePolicy
+### 4.10 发布保护
 
-用途：控制确认门禁和冻结。
+发布保护直接归属 `Environment`，不单独建策略实体。
 
-关键字段：
-
-| 字段 | 说明 |
-|------|------|
-| `id` | 主键 |
-| `scope_type` | `system` / `environment` / `service` |
-| `scope_id` | 作用域 ID，system 时为空 |
-| `confirm_mode` | `self_confirm` / `admin_confirm` |
-| `manual_freeze_enabled` | 是否冻结 |
-| `created_at` / `updated_at` | 时间 |
-
-合并规则：
-
-```text
-服务级策略 > 环境级策略 > 系统默认策略
-```
-
-硬约束：
-
-- 生产环境必须管理员确认，服务级策略不能放宽。
-- 冻结打开后新发布 preflight 返回 block，待确认发布不得确认通过。
+- `is_production=true` 时固定管理员确认，其他环境固定本人确认。
+- `release_frozen=true` 时发布 preflight 返回 block，待确认发布不得确认通过。
+- 已 queued 的发布在冻结期间暂停领取，running 发布继续执行。
 - 同服务同环境已有 running 发布时，默认阻断新的真实执行。
 
 ### 4.11 ReleaseRequest

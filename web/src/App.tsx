@@ -71,7 +71,6 @@ type AppState = {
   events: Entity[];
   serverLogs: Entity[];
   states: Entity[];
-  policies: Entity[];
   notificationConfigs: Entity[];
   notificationDeliveries: Entity[];
   ops: Entity | null;
@@ -96,11 +95,10 @@ type ManualTargetRef = {
   targetRefID: string;
 };
 
-type Page = 'workbench' | 'create' | 'releases' | 'release-detail' | 'deploys' | 'configuration' | 'policy' | 'management' | 'api-keys';
+type Page = 'workbench' | 'create' | 'releases' | 'release-detail' | 'deploys' | 'configuration' | 'management' | 'api-keys';
 type ReleaseView = 'pending' | 'mine' | 'all';
 type InfrastructureView = 'overview' | 'application' | 'runtime' | 'targeting' | 'state';
 type ManagementView = 'overview' | 'users' | 'access' | 'notifications' | 'credentials';
-type PolicyView = 'overview' | 'rules';
 
 type AppRoute = {
   page: Page;
@@ -116,7 +114,6 @@ function routeFromLocation(): AppRoute {
     case '/releases': return { page: 'releases' };
     case '/deploys': return { page: 'deploys' };
     case '/configuration': return { page: 'configuration' };
-    case '/policy': return { page: 'policy' };
     case '/management': return { page: 'management' };
     case '/access-keys': return { page: 'api-keys' };
     default: return { page: 'workbench' };
@@ -125,7 +122,7 @@ function routeFromLocation(): AppRoute {
 
 function pathForPage(page: Page, releaseID?: string) {
   if (page === 'release-detail' && releaseID) return `/releases/${encodeURIComponent(releaseID)}`;
-  return ({ workbench: '/', create: '/releases/new', releases: '/releases', deploys: '/deploys', configuration: '/configuration', policy: '/policy', management: '/management', 'api-keys': '/access-keys', 'release-detail': '/releases' } as Record<Page, string>)[page];
+  return ({ workbench: '/', create: '/releases/new', releases: '/releases', deploys: '/deploys', configuration: '/configuration', management: '/management', 'api-keys': '/access-keys', 'release-detail': '/releases' } as Record<Page, string>)[page];
 }
 
 const emptyState: AppState = {
@@ -144,7 +141,6 @@ const emptyState: AppState = {
   events: [],
   serverLogs: [],
   states: [],
-  policies: [],
   notificationConfigs: [],
   notificationDeliveries: [],
   ops: null,
@@ -195,8 +191,6 @@ export function App() {
   const [releaseFilterNow, setReleaseFilterNow] = useState(0);
   const [infrastructureView, setInfrastructureView] = useState<InfrastructureView>('overview');
   const [managementView, setManagementView] = useState<ManagementView>('overview');
-  const [policyView, setPolicyView] = useState<PolicyView>('overview');
-  const [effectivePolicy, setEffectivePolicy] = useState<Entity | null>(null);
   const [currentUser, setCurrentUser] = useState<Entity | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const activeReleaseID = activeRelease?.id as string | undefined;
@@ -309,7 +303,6 @@ export function App() {
         releases,
         deploys,
         states,
-        policies,
         notificationConfigs,
         notificationDeliveries,
         ops,
@@ -327,7 +320,6 @@ export function App() {
         apiGet<Entity[]>('/api/v1/release-requests'),
         apiGet<Entity[]>('/api/v1/deploy-records'),
         apiGet<Entity[]>('/api/v1/server-deployment-states'),
-        currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/release-policies') : Promise.resolve([]),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/notification-configs') : Promise.resolve([]),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/notification-deliveries') : Promise.resolve([]),
         apiGet<Entity>('/api/v1/ops/summary'),
@@ -359,7 +351,6 @@ export function App() {
         events,
         serverLogs,
         states,
-        policies,
         notificationConfigs,
         notificationDeliveries,
         ops,
@@ -466,16 +457,6 @@ export function App() {
       return { serviceID, environmentID, versionID, targetID, userID };
     });
   }, [currentUser?.id, state.environments, state.services, state.targets, state.users, state.versions]);
-
-  useEffect(() => {
-    if (currentUser?.role !== 'admin' || !selection.serviceID || !selection.environmentID) {
-      setEffectivePolicy(null);
-      return;
-    }
-    void apiGet<Entity>(`/api/v1/release-policies/effective?service_id=${encodeURIComponent(selection.serviceID)}&environment_id=${encodeURIComponent(selection.environmentID)}`)
-      .then(setEffectivePolicy)
-      .catch(() => setEffectivePolicy(null));
-  }, [currentUser?.role, selection.environmentID, selection.serviceID]);
 
   useEffect(() => {
     setPreflight(null);
@@ -739,7 +720,6 @@ export function App() {
             <NavButton active={page === 'workbench'} onClick={() => setPage('workbench')}>工作台</NavButton>
             <NavButton active={page === 'create' || page === 'releases' || page === 'release-detail' || page === 'deploys'} onClick={() => setPage('releases')}>发布</NavButton>
             {currentUser.role === 'admin' ? <NavButton active={page === 'configuration'} onClick={() => setPage('configuration')}>配置</NavButton> : null}
-            {currentUser.role === 'admin' ? <NavButton active={page === 'policy'} onClick={() => setPage('policy')}>策略</NavButton> : null}
             {currentUser.role === 'admin' ? <NavButton active={page === 'management'} onClick={() => setPage('management')}>系统</NavButton> : null}
           </nav>
           <div className="header-actions">
@@ -906,8 +886,8 @@ export function App() {
                   </> : null}
                   {infrastructureView === 'runtime' ? <>
                     <InfrastructureSectionHeading eyebrow="RUNTIME" title="运行环境" description="管理发布到哪里，以及哪些服务器作为一个批次共同执行。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EntityList title="环境" data={state.environments} fields={['slug', 'is_production']} /><EntityList title="服务器" data={state.servers} fields={['host', 'username', 'last_check_status']} /><ServerGroupList data={state.serverGroups} state={state} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
-                    <section className="surface infrastructure-maintenance"><SectionTitle title="维护与连通性" meta="MANAGE" /><div className="infrastructure-maintenance-grid"><div><h3>环境</h3><EnvironmentEditor environments={state.environments} onDone={() => void refreshAll()} /></div><div><h3>服务器与 SSH</h3><ServerEditor servers={state.servers} credentials={state.credentials} onDone={() => void refreshAll()} /></div><div><h3>服务器组</h3><ServerGroupEditor groups={state.serverGroups} servers={state.servers} onDone={() => void refreshAll()} /></div></div></section>
+                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EntityList title="环境" data={state.environments} fields={['slug', 'is_production', 'release_frozen']} /><EntityList title="服务器" data={state.servers} fields={['host', 'username', 'last_check_status']} /><ServerGroupList data={state.serverGroups} state={state} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
+                    <section className="surface infrastructure-maintenance"><SectionTitle title="维护与发布保护" meta="MANAGE" /><div className="infrastructure-maintenance-grid"><div><h3>环境</h3><EnvironmentEditor environments={state.environments} onDone={() => void refreshAll()} /></div><div><h3>服务器与 SSH</h3><ServerEditor servers={state.servers} credentials={state.credentials} onDone={() => void refreshAll()} /></div><div><h3>服务器组</h3><ServerGroupEditor groups={state.serverGroups} servers={state.servers} onDone={() => void refreshAll()} /></div></div></section>
                   </> : null}
                   {infrastructureView === 'targeting' ? <>
                     <InfrastructureSectionHeading eyebrow="DEPLOYMENT TARGET" title="部署连接" description="把服务、环境与服务器或服务器组组合为发布时可选择的部署目标。" />
@@ -923,16 +903,6 @@ export function App() {
             </>
           ) : null}
 
-          {page === 'policy' ? (
-            <>
-              <PageHeading eyebrow="RELEASE POLICY" title="发布策略中心" description="策略在创建和确认时都会重新校验；这里负责定义范围、确认方式与冻结门禁。" />
-              <section className="surface policy-map"><div><span className="mono-label">策略优先级</span><h2>系统规则 → 环境覆盖 → 服务覆盖</h2><p>范围越具体，优先级越高；无论如何，生产发布仍必须由管理员确认。</p></div><div className="policy-flow"><span>系统</span><i>→</i><span>环境</span><i>→</i><span>服务</span><b>发布时取最终生效值</b></div></section>
-              <section className="policy-workspace-layout"><nav className="policy-nav" aria-label="策略模块"><PolicyNavButton active={policyView === 'overview'} label="策略概览" note="查看门禁状态" count={state.policies.length} onClick={() => setPolicyView('overview')} /><PolicyNavButton active={policyView === 'rules'} label="策略规则" note="新增或修改覆盖规则" count={state.policies.filter((item) => item.manual_freeze_enabled === true).length} onClick={() => setPolicyView('rules')} /></nav><div className="policy-workspace">
-                {policyView === 'overview' ? <><section className="surface policy-summary"><SectionTitle title="策略状态" meta="GUARDRAILS" /><div className="policy-stat-grid"><PolicyStat label="已配置策略" value={state.policies.length} note="系统、环境和服务范围" onClick={() => setPolicyView('rules')} /><PolicyStat label="冻结规则" value={state.policies.filter((item) => item.manual_freeze_enabled === true).length} note="阻断新建与确认" onClick={() => setPolicyView('rules')} /><PolicyStat label="管理员确认" value={state.policies.filter((item) => item.confirm_mode === 'admin_confirm').length} note="生产发布强制执行" onClick={() => setPolicyView('rules')} /></div></section><section className="surface policy-effective"><span className="mono-label">当前选择的最终策略</span><h2>{selected.service?.name ?? '选择服务'} <small>/</small> {selected.environment?.name ?? '选择环境'}</h2>{effectivePolicy ? <KeyValueGrid values={[["生效范围", formatPolicyScope(effectivePolicy, state)], ["确认方式", effectivePolicy.confirm_mode], ["发布冻结", effectivePolicy.manual_freeze_enabled ? '已冻结' : '未冻结']]} /> : <p>请在创建发布或基础设施页面选择服务和环境后查看最终生效策略。</p>}<div className="policy-effective-note">冻结会阻断新发布和待确认发布；已 queued 的任务暂停领取，running 任务继续执行。</div></section></> : null}
-                {policyView === 'rules' ? <><PolicySectionHeading eyebrow="RULES" title="策略规则" description="优先使用范围最小的规则。保存后会立即影响后续创建和确认的预检。" /><div className="policy-columns"><section className="surface policy-inventory"><SectionTitle title="已配置规则" meta="INVENTORY" /><PolicyList data={state.policies} state={state} /></section><section className="surface policy-actions"><SectionTitle title="新增或更新规则" meta="EDIT" /><PolicyForm services={state.services} environments={state.environments} onDone={() => void refreshAll()} /></section></div></> : null}
-              </div></section>
-            </>
-          ) : null}
 
           {page === 'management' ? <>
             <PageHeading eyebrow="ADMINISTRATION" title="管理控制台" description="管理人员、访问凭据和通知集成。高风险配置按职责单独处理。" />
@@ -940,7 +910,7 @@ export function App() {
             <section className="management-layout"><nav className="management-nav" aria-label="管理模块"><ManagementNavButton active={managementView === 'overview'} label="管理概览" note="查看关键状态" count={state.users.length} onClick={() => setManagementView('overview')} /><ManagementNavButton active={managementView === 'users'} label="用户与权限" note="确认发布身份" count={state.users.length} onClick={() => setManagementView('users')} /><ManagementNavButton active={managementView === 'access'} label="集成访问密钥" note="访问密钥与 scopes" count={state.apiKeys.length} onClick={() => setManagementView('access')} /><ManagementNavButton active={managementView === 'notifications'} label="通知与投递" note="机器人与发送记录" count={state.notificationConfigs.length} onClick={() => setManagementView('notifications')} /><ManagementNavButton active={managementView === 'credentials'} label="连接凭据" note="SSH 认证材料" count={state.credentials.length} onClick={() => setManagementView('credentials')} /></nav>
               <div className="management-workspace">
                 {managementView === 'overview' ? <><section className="surface management-summary"><SectionTitle title="管理状态" meta="CONTROL PLANE" /><div className="management-stat-grid"><ManagementStat label="可用用户" value={state.users.filter((item) => item.enabled !== false).length} note="可登录并参与发布" onClick={() => setManagementView('users')} /><ManagementStat label="启用访问密钥" value={state.apiKeys.filter((item) => item.enabled !== false).length} note="供 CI/CD 和脚本调用" onClick={() => setManagementView('access')} /><ManagementStat label="启用通知" value={state.notificationConfigs.filter((item) => item.enabled !== false).length} note="企业微信机器人" onClick={() => setManagementView('notifications')} /><ManagementStat label="投递异常" value={state.notificationDeliveries.filter((item) => item.status !== 'sent').length} note="查看最近失败原因" onClick={() => setManagementView('notifications')} /></div></section><section className="surface management-guide"><span className="mono-label">日常管理</span><h2>只在需要时打开对应的管理面板。</h2><div><button onClick={() => setManagementView('users')}>新增发布用户 <span>用户与权限 →</span></button><button onClick={() => setManagementView('access')}>创建 CI/CD 访问密钥 <span>集成访问密钥 →</span></button><button onClick={() => setManagementView('notifications')}>测试通知机器人 <span>通知与投递 →</span></button></div></section></> : null}
-                {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境仍由管理员确认，不在此处绕过发布策略。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建用户" meta="CREATE" /><UserForm onDone={(user) => refreshWithSelection({ userID: String(user.id ?? '') })} /></section></div></> : null}
+                {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建用户" meta="CREATE" /><UserForm onDone={(user) => refreshWithSelection({ userID: String(user.id ?? '') })} /></section></div></> : null}
                 {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建集成访问密钥" meta="CREATE" /><APIKeyForm users={state.users} onDone={() => void refreshAll()} /></section></div></> : null}
                 {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="新增通知配置" meta="CREATE" /><NotificationForm onDone={() => void refreshAll()} /></section></div><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><EntityList title="最近投递" data={state.notificationDeliveries} fields={['event_type', 'status', 'last_error']} /></section></> : null}
                 {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据只供服务器 SSH 连接引用；Secret 不会在创建后再次展示。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><EntityList title="凭据" data={state.credentials} fields={['type', 'enabled', 'description']} /></section><section className="surface management-actions"><SectionTitle title="保存连接凭据" meta="CREATE" /><CredentialForm onDone={() => void refreshAll()} /></section></div></> : null}
@@ -1164,29 +1134,6 @@ function ManagementSectionHeading({ eyebrow, title, description }: { eyebrow: st
   return <div className="management-section-heading"><span className="mono-label">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>;
 }
 
-function PolicyNavButton({ active, label, note, count, onClick }: { active: boolean; label: string; note: string; count: number; onClick: () => void }) {
-  return <button className={active ? 'policy-nav-button active' : 'policy-nav-button'} onClick={onClick}><span><strong>{label}</strong><small>{note}</small></span><b>{count}</b></button>;
-}
-
-function PolicyStat({ label, value, note, onClick }: { label: string; value: number; note: string; onClick: () => void }) {
-  return <button className="policy-stat" onClick={onClick}><span>{label}</span><strong>{value}</strong><small>{note} →</small></button>;
-}
-
-function PolicySectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <div className="policy-section-heading"><span className="mono-label">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>;
-}
-
-function formatPolicyScope(item: Entity, state: AppState) {
-  const scopeID = String(item.scope_id ?? '');
-  if (item.scope_type === 'environment') return `环境 · ${namedRef(findByID(state.environments, scopeID), scopeID, 'name')}`;
-  if (item.scope_type === 'service') return `服务 · ${namedRef(findByID(state.services, scopeID), scopeID, 'name')}`;
-  return '系统默认';
-}
-
-function PolicyList({ data, state }: { data: Entity[]; state: AppState }) {
-  return <div className="policy-list"><DataList data={data} renderItem={(item) => <div className="policy-row"><div><strong>{formatPolicyScope(item, state)}</strong><small>{`确认方式 · ${item.confirm_mode ?? 'self_confirm'}`}</small></div><div><StatusTag value={item.manual_freeze_enabled === true ? 'frozen' : 'active'} /></div></div>} /></div>;
-}
-
 function EntityList({ title, data, fields }: { title: string; data: Entity[]; fields: string[] }) {
   return (
     <div className="mini-list">
@@ -1305,7 +1252,7 @@ function EnvironmentEditor({ environments, onDone }: { environments: Entity[]; o
   const selected = findByID(environments, selectedID);
   function choose(id: string) { const item = findByID(environments, id); setSelectedID(id); form.setFieldsValue(item); }
   async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/environments/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择环境"><Select value={selectedID || undefined} placeholder="选择环境" options={environments.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="slug" label="Slug" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="is_production" valuePropName="checked"><Checkbox>生产环境</Checkbox></Form.Item><Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Button type="primary" htmlType="submit" loading={loading}>保存环境</Button></> : <div className="form-empty">选择一项开始编辑。</div>}</Form>;
+  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择环境"><Select value={selectedID || undefined} placeholder="选择环境" options={environments.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="slug" label="Slug" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="is_production" valuePropName="checked"><Checkbox>生产环境（固定要求管理员确认）</Checkbox></Form.Item><Form.Item name="release_frozen" valuePropName="checked"><Checkbox>冻结此环境的发布</Checkbox></Form.Item><Typography.Text type="secondary">冻结会阻断新建和确认；已入队任务暂停领取，运行中的任务继续。</Typography.Text><Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Button type="primary" htmlType="submit" loading={loading}>保存环境</Button></> : <div className="form-empty">选择一项开始编辑。</div>}</Form>;
 }
 
 function ServerEditor({ servers, credentials, onDone }: { servers: Entity[]; credentials: Entity[]; onDone: () => void }) {
@@ -1768,61 +1715,6 @@ function UserList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
 
 function entityOption(item: Entity) {
   return { label: selectLabel(item, 'name'), value: String(item.id) };
-}
-
-function PolicyForm({ services, environments, onDone }: { services: Entity[]; environments: Entity[]; onDone: () => void }) {
-  const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const scopeType = Form.useWatch('scope_type', form) as string | undefined;
-  async function submit(values: Entity) {
-    setLoading(true);
-    try {
-      await apiPost<Entity>('/api/v1/release-policies', {
-        ...values,
-        scope_id: values.scope_type === 'system' ? '' : values.scope_id,
-      });
-      onDone();
-    } finally {
-      setLoading(false);
-    }
-  }
-  return (
-    <Form form={form} layout="vertical" initialValues={{ scope_type: 'system', confirm_mode: 'self_confirm', manual_freeze_enabled: false }} onFinish={(values) => void submit(values)}>
-      <Form.Item name="scope_type" label="范围" rules={[{ required: true }]}>
-        <Select
-          options={[
-            { label: 'system', value: 'system' },
-            { label: 'environment', value: 'environment' },
-            { label: 'service', value: 'service' },
-          ]}
-        />
-      </Form.Item>
-      {scopeType === 'environment' ? (
-        <Form.Item name="scope_id" label="环境" rules={[{ required: true }]}>
-          <Select options={environments.map((item) => ({ label: String(item.name ?? item.id), value: item.id }))} />
-        </Form.Item>
-      ) : null}
-      {scopeType === 'service' ? (
-        <Form.Item name="scope_id" label="服务" rules={[{ required: true }]}>
-          <Select options={services.map((item) => ({ label: String(item.name ?? item.id), value: item.id }))} />
-        </Form.Item>
-      ) : null}
-      <Form.Item name="confirm_mode" label="确认方式" rules={[{ required: true }]}>
-        <Select
-          options={[
-            { label: 'self_confirm', value: 'self_confirm' },
-            { label: 'admin_confirm', value: 'admin_confirm' },
-          ]}
-        />
-      </Form.Item>
-      <Form.Item name="manual_freeze_enabled" valuePropName="checked">
-        <Checkbox>冻结发布</Checkbox>
-      </Form.Item>
-      <Button type="primary" htmlType="submit" loading={loading}>
-        保存策略
-      </Button>
-    </Form>
-  );
 }
 
 function NotificationForm({ onDone }: { onDone: () => void }) {

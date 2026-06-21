@@ -41,13 +41,14 @@ type ServiceVersion struct {
 }
 
 type Environment struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Slug         string    `json:"slug"`
-	IsProduction bool      `json:"is_production"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Slug          string    `json:"slug"`
+	IsProduction  bool      `json:"is_production"`
+	ReleaseFrozen bool      `json:"release_frozen"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Server struct {
@@ -125,16 +126,6 @@ type Credential struct {
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type ReleasePolicy struct {
-	ID                  string    `json:"id"`
-	ScopeType           string    `json:"scope_type"`
-	ScopeID             string    `json:"scope_id"`
-	ConfirmMode         string    `json:"confirm_mode"`
-	ManualFreezeEnabled bool      `json:"manual_freeze_enabled"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type ReleaseRequest struct {

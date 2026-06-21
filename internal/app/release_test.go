@@ -168,7 +168,8 @@ func TestReleaseServiceM2Flow(t *testing.T) {
 		t.Fatalf("expected running conflict block, got %#v", blocked)
 	}
 
-	if _, err := service.SetFreeze(ctx, "environment", fixture.testEnv.ID, true); err != nil {
+	fixture.testEnv.ReleaseFrozen = true
+	if _, err := store.UpdateEnvironment(ctx, fixture.testEnv.ID, fixture.testEnv); err != nil {
 		t.Fatal(err)
 	}
 	frozen, err := service.Preflight(ctx, PreflightInput{
@@ -180,7 +181,7 @@ func TestReleaseServiceM2Flow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if frozen.Result != "block" {
+	if frozen.Result != "block" || !hasPreflightItem(frozen, "environment_frozen", "block") {
 		t.Fatalf("expected freeze block, got %#v", frozen)
 	}
 
@@ -257,43 +258,33 @@ func TestReleaseServiceRetryCreatesNewReleaseAndPreflight(t *testing.T) {
 	}
 }
 
-func TestReleaseServiceEffectivePolicy(t *testing.T) {
+func TestReleaseServiceEnvironmentFreezeBlocksConfirmation(t *testing.T) {
 	_, store := newReleaseTestStore(t)
 	service := NewReleaseService(store)
 	ctx := context.Background()
 	fixture := createReleaseFixture(t, store)
 
-	if _, err := service.SavePolicy(ctx, PolicyInput{
-		ScopeType:           "environment",
-		ScopeID:             fixture.testEnv.ID,
-		ConfirmMode:         "admin_confirm",
-		ManualFreezeEnabled: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.SavePolicy(ctx, PolicyInput{
-		ScopeType:           "service",
-		ScopeID:             fixture.service.ID,
-		ConfirmMode:         "self_confirm",
-		ManualFreezeEnabled: false,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	policy, err := service.EffectivePolicy(ctx, fixture.service.ID, fixture.testEnv.ID)
+	release, _, err := service.Create(ctx, CreateReleaseInput{
+		PreflightInput: PreflightInput{
+			ServiceID:          fixture.service.ID,
+			EnvironmentID:      fixture.testEnv.ID,
+			ServiceVersionID:   fixture.version.ID,
+			DeploymentTargetID: fixture.testTarget.ID,
+		},
+		CreatedByType: "user",
+		CreatedByID:   fixture.employee.ID,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.ConfirmMode != "self_confirm" || policy.ManualFreezeEnabled {
-		t.Fatalf("expected service policy to override environment policy, got %#v", policy)
-	}
-
-	prodPolicy, err := service.EffectivePolicy(ctx, fixture.service.ID, fixture.prodEnv.ID)
-	if err != nil {
+	fixture.testEnv.ReleaseFrozen = true
+	if _, err := store.UpdateEnvironment(ctx, fixture.testEnv.ID, fixture.testEnv); err != nil {
 		t.Fatal(err)
 	}
-	if prodPolicy.ConfirmMode != "admin_confirm" {
-		t.Fatalf("expected production policy to force admin_confirm, got %#v", prodPolicy)
+
+	_, err = service.Confirm(ctx, release.ID, ConfirmInput{UserID: fixture.employee.ID})
+	if !errors.Is(err, ErrPreflightBlocked) {
+		t.Fatalf("expected frozen environment to block confirmation, got %v", err)
 	}
 }
 

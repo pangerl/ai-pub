@@ -23,6 +23,7 @@ CREATE TABLE environments (
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
   is_production INTEGER NOT NULL DEFAULT 0,
+  release_frozen INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

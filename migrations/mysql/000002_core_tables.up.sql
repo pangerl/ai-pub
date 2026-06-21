@@ -99,18 +99,6 @@ CREATE TABLE deployment_targets (
 
 CREATE INDEX idx_deployment_targets_service_env ON deployment_targets(service_id, environment_id);
 
-CREATE TABLE release_policies (
-  id VARCHAR(64) PRIMARY KEY,
-  scope_type VARCHAR(32) NOT NULL,
-  scope_id VARCHAR(64) NOT NULL,
-  confirm_mode VARCHAR(32) NOT NULL,
-  manual_freeze_enabled TINYINT(1) NOT NULL DEFAULT 0,
-  ssh_realtime_check_required TINYINT(1) NOT NULL DEFAULT 0,
-  created_at VARCHAR(64) NOT NULL,
-  updated_at VARCHAR(64) NOT NULL,
-  UNIQUE KEY uniq_release_policies_scope (scope_type, scope_id)
-);
-
 CREATE TABLE release_requests (
   id VARCHAR(64) PRIMARY KEY,
   project_id VARCHAR(64) NOT NULL,

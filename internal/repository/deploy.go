@@ -49,6 +49,7 @@ SELECT dr.id, dr.release_request_id, dr.status, dr.executor_type, dr.target_snap
 dr.failed_servers, dr.skipped_servers, dr.worker_id, dr.created_at, dr.updated_at
 FROM deploy_records dr
 JOIN release_requests rr ON rr.id = dr.release_request_id
+JOIN environments env ON env.id = rr.environment_id
 WHERE dr.status = 'queued' AND rr.status = 'queued'
 AND NOT EXISTS (
   SELECT 1
@@ -59,12 +60,7 @@ AND NOT EXISTS (
     AND running_record.status = 'running'
     AND running.status = 'running'
 )
-AND COALESCE(
-  (SELECT manual_freeze_enabled FROM release_policies WHERE scope_type = 'service' AND scope_id = rr.service_id),
-  (SELECT manual_freeze_enabled FROM release_policies WHERE scope_type = 'environment' AND scope_id = rr.environment_id),
-  (SELECT manual_freeze_enabled FROM release_policies WHERE scope_type = 'system' AND scope_id = ''),
-  0
-) = 0
+AND env.release_frozen = 0
 ORDER BY dr.created_at ASC, dr.id ASC
 LIMIT 1`)
 	record, err := scanDeployRecord(row)

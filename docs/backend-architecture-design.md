@@ -61,12 +61,11 @@ HTTP request
 | 服务 | 责任 |
 |------|------|
 | `ReleaseService` | 创建发布单、查询发布单、取消、回滚 |
-| `PreflightService` | 发布前检查、策略合并、风险提示 |
+| `PreflightService` | 发布前检查、环境保护和风险提示 |
 | `ConfirmService` | 本人确认、管理员确认、驳回 |
 | `DeployService` | 创建发布记录、生成执行快照、状态聚合 |
 | `WorkerService` | 领取任务、调执行器、心跳、状态修复 |
 | `InventoryService` | 项目、服务、版本、环境、服务器、部署目标 |
-| `PolicyService` | 发布策略、冻结开关 |
 | `CredentialService` | 凭据加密、脱敏、SSH 配置读取 |
 | `NotificationService` | 通知事件生成、发送、失败记录 |
 | `AuditService` | 事件写入和查询 |
@@ -91,8 +90,8 @@ HTTP request
 事务内：
 
 1. 读取发布单或发布意图上下文。
-2. 合并系统、环境、服务策略。
-3. 检查冻结、生产门禁、部署目标完整性、运行中发布。
+2. 读取环境的生产标记和冻结状态。
+3. 检查环境冻结、生产门禁、部署目标完整性、运行中发布。
 4. 记录 `ReleaseEvent(preflight_checked)`。
 
 ### 6.3 确认并入队

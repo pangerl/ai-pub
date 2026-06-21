@@ -5,7 +5,6 @@ DROP TABLE IF EXISTS server_deployment_states;
 DROP TABLE IF EXISTS server_deploy_logs;
 DROP TABLE IF EXISTS deploy_records;
 DROP TABLE IF EXISTS release_requests;
-DROP TABLE IF EXISTS release_policies;
 DROP TABLE IF EXISTS deployment_targets;
 DROP TABLE IF EXISTS server_group_members;
 DROP TABLE IF EXISTS server_groups;

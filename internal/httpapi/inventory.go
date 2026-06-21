@@ -218,10 +218,11 @@ func patchEnvironment(store repository.Store) http.HandlerFunc {
 			return
 		}
 		var patch struct {
-			Name         *string `json:"name"`
-			Slug         *string `json:"slug"`
-			IsProduction *bool   `json:"is_production"`
-			Enabled      *bool   `json:"enabled"`
+			Name          *string `json:"name"`
+			Slug          *string `json:"slug"`
+			IsProduction  *bool   `json:"is_production"`
+			ReleaseFrozen *bool   `json:"release_frozen"`
+			Enabled       *bool   `json:"enabled"`
 		}
 		if !decodeJSON(w, r, &patch) {
 			return
@@ -234,6 +235,9 @@ func patchEnvironment(store repository.Store) http.HandlerFunc {
 		}
 		if patch.IsProduction != nil {
 			existing.IsProduction = *patch.IsProduction
+		}
+		if patch.ReleaseFrozen != nil {
+			existing.ReleaseFrozen = *patch.ReleaseFrozen
 		}
 		if patch.Enabled != nil {
 			existing.Enabled = *patch.Enabled

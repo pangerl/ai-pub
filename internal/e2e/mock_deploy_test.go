@@ -211,7 +211,8 @@ func TestSQLiteFreezePausesQueuedDeployClaim(t *testing.T) {
 	fixture := seedE2E(t, store)
 	releases := app.NewReleaseService(store)
 	createQueuedRelease(t, ctx, releases, fixture, fixture.successTarget)
-	if _, err := releases.SetFreeze(ctx, "environment", fixture.env.ID, true); err != nil {
+	fixture.env.ReleaseFrozen = true
+	if _, err := store.UpdateEnvironment(ctx, fixture.env.ID, fixture.env); err != nil {
 		t.Fatal(err)
 	}
 
@@ -219,7 +220,8 @@ func TestSQLiteFreezePausesQueuedDeployClaim(t *testing.T) {
 	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected frozen queued release to pause claiming, got %v", err)
 	}
-	if _, err := releases.SetFreeze(ctx, "environment", fixture.env.ID, false); err != nil {
+	fixture.env.ReleaseFrozen = false
+	if _, err := store.UpdateEnvironment(ctx, fixture.env.ID, fixture.env); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := store.ClaimNextDeploy(ctx, "unfrozen_worker")
