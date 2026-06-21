@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
 API_URL="${BASE_URL}/api/v1"
 TMP_DIR="$(mktemp -d)"
+COOKIE_JAR="${TMP_DIR}/cookies.txt"
 
 cleanup() {
   rm -rf "${TMP_DIR}"
@@ -21,9 +22,9 @@ api() {
   local out="$4"
   local code
   if [[ -z "${body}" ]]; then
-    code="$(curl -sS -o "${out}" -w '%{http_code}' -X "${method}" "${API_URL}${path}")"
+    code="$(curl -sS -b "${COOKIE_JAR}" -o "${out}" -w '%{http_code}' -X "${method}" "${API_URL}${path}")"
   else
-    code="$(curl -sS -o "${out}" -w '%{http_code}' -X "${method}" "${API_URL}${path}" -H 'Content-Type: application/json' -d "${body}")"
+    code="$(curl -sS -b "${COOKIE_JAR}" -o "${out}" -w '%{http_code}' -X "${method}" "${API_URL}${path}" -H 'Content-Type: application/json' -d "${body}")"
   fi
   if [[ "${code}" -lt 200 || "${code}" -ge 300 ]]; then
     printf 'request failed: %s %s -> HTTP %s\n' "${method}" "${path}" "${code}" >&2
@@ -129,6 +130,15 @@ if [[ "$(json_get "${health_file}" data.status)" != "ok" ]]; then
 fi
 log "backend is healthy"
 
+login_file="${TMP_DIR}/login.json"
+login_code="$(curl -sS -c "${COOKIE_JAR}" -o "${login_file}" -w '%{http_code}' -X POST "${API_URL}/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"ai-pub-dev-admin"}')"
+if [[ "${login_code}" != "200" ]]; then
+  printf 'admin login failed -> HTTP %s\n' "${login_code}" >&2
+  cat "${login_file}" >&2
+  exit 1
+fi
+log "bootstrap administrator login succeeded"
+
 suffix="$(date +%s)"
 
 project_file="${TMP_DIR}/project.json"
@@ -200,9 +210,33 @@ failure_target_id="$(json_get "${failure_target_file}" data.id)"
 assert_non_empty failure_target_id "${failure_target_id}"
 
 user_file="${TMP_DIR}/user.json"
-api POST /users "{\"username\":\"local-${suffix}\",\"display_name\":\"Local Check\",\"role\":\"employee\",\"enabled\":true}" "${user_file}"
+api POST /users "{\"username\":\"local-${suffix}\",\"display_name\":\"Local Check\",\"role\":\"employee\",\"password\":\"local-check-password\",\"enabled\":true}" "${user_file}"
 user_id="$(json_get "${user_file}" data.id)"
 assert_non_empty user_id "${user_id}"
+
+employee_cookie="${TMP_DIR}/employee-cookies.txt"
+employee_login_file="${TMP_DIR}/employee-login.json"
+employee_login_code="$(curl -sS -c "${employee_cookie}" -o "${employee_login_file}" -w '%{http_code}' -X POST "${API_URL}/auth/login" -H 'Content-Type: application/json' -d "{\"username\":\"local-${suffix}\",\"password\":\"local-check-password\"}")"
+if [[ "${employee_login_code}" != "200" ]]; then
+  printf 'employee login failed -> HTTP %s\n' "${employee_login_code}" >&2
+  cat "${employee_login_file}" >&2
+  exit 1
+fi
+employee_key_file="${TMP_DIR}/employee-key.json"
+employee_key_code="$(curl -sS -b "${employee_cookie}" -o "${employee_key_file}" -w '%{http_code}' -X POST "${API_URL}/api-keys" -H 'Content-Type: application/json' -d "{\"name\":\"employee-ci-${suffix}\",\"owner_type\":\"user\",\"owner_id\":\"forged-owner\",\"scopes\":\"[\\\"release:create\\\"]\"}")"
+if [[ "${employee_key_code}" != "201" || "$(json_get "${employee_key_file}" data.key.owner_id)" != "${user_id}" ]]; then
+  printf 'employee API key creation failed -> HTTP %s\n' "${employee_key_code}" >&2
+  cat "${employee_key_file}" >&2
+  exit 1
+fi
+employee_keys_file="${TMP_DIR}/employee-keys.json"
+employee_keys_code="$(curl -sS -b "${employee_cookie}" -o "${employee_keys_file}" -w '%{http_code}' "${API_URL}/api-keys")"
+if [[ "${employee_keys_code}" != "200" || "$(json_len "${employee_keys_file}" data)" != "1" ]]; then
+  printf 'employee API key listing failed -> HTTP %s\n' "${employee_keys_code}" >&2
+  cat "${employee_keys_file}" >&2
+  exit 1
+fi
+log "employee API Key ownership is scoped to the current user"
 
 create_release() {
   local version_id="$1"
@@ -289,6 +323,17 @@ failure_release_id="$(create_release "${version2_id}" "${failure_target_id}" "lo
 confirm_release "${failure_release_id}"
 wait_release "${failure_release_id}" failed
 
+retry_file="${TMP_DIR}/retry.json"
+api POST "/release-requests/${failure_release_id}/retry" "{\"idempotency_key\":\"local-retry-${suffix}\"}" "${retry_file}"
+retry_id="$(json_get "${retry_file}" data.release.id)"
+assert_non_empty retry_id "${retry_id}"
+if [[ "${retry_id}" == "${failure_release_id}" || "$(json_get "${retry_file}" data.release.status)" != "pending_confirm" || "$(json_get "${retry_file}" data.preflight.result)" != "pass" ]]; then
+  cat "${retry_file}" >&2
+  exit 1
+fi
+confirm_release "${retry_id}"
+wait_release "${retry_id}" failed
+
 candidates_file="${TMP_DIR}/rollback-candidates.json"
 api GET "/release-requests/${release2_id}/rollback-candidates" "" "${candidates_file}"
 if [[ "$(json_len "${candidates_file}" data)" -lt 1 ]]; then
@@ -326,6 +371,7 @@ log "success release: ${release1_id}"
 log "server group release: ${group_release_id}"
 log "partial release: ${partial_release_id}"
 log "failure release: ${failure_release_id}"
+log "retry release: ${retry_id}"
 log "rollback release: ${rollback_id}"
 log "rejected release: ${reject_id}"
 log "cancelled release: ${cancel_id}"

@@ -15,8 +15,10 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"ai-pub/internal/app"
+	"ai-pub/internal/auth"
 	"ai-pub/internal/config"
 	"ai-pub/internal/crypto"
+	"ai-pub/internal/domain"
 	"ai-pub/internal/httpapi"
 	"ai-pub/internal/migration"
 	"ai-pub/internal/repository"
@@ -52,6 +54,9 @@ func run() error {
 		return nil
 	}
 	slog.Info("migration complete", "applied", len(report.Applied))
+	if err := ensureBootstrapAdmin(context.Background(), repository.NewStore(db), cfg); err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -93,6 +98,36 @@ func run() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	return server.Shutdown(shutdownCtx)
+}
+
+func ensureBootstrapAdmin(ctx context.Context, store repository.Store, cfg config.Config) error {
+	admin, err := store.GetUserByUsername(ctx, cfg.BootstrapAdminUsername)
+	if err == nil && admin.PasswordHash != "" {
+		return nil
+	}
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return fmt.Errorf("find bootstrap admin: %w", err)
+	}
+	if cfg.BootstrapAdminPassword == "" {
+		return errors.New("BOOTSTRAP_ADMIN_PASSWORD is required until the bootstrap administrator has a password")
+	}
+	hash, err := auth.HashPassword(cfg.BootstrapAdminPassword)
+	if err != nil {
+		return err
+	}
+	if err == nil && admin.ID != "" {
+		if err := store.SetUserPassword(ctx, admin.ID, hash); err != nil {
+			return fmt.Errorf("set bootstrap admin password: %w", err)
+		}
+		slog.Info("bootstrap admin password initialized", "username", cfg.BootstrapAdminUsername)
+		return nil
+	}
+	_, err = store.CreateUserWithPassword(ctx, domain.User{Username: cfg.BootstrapAdminUsername, DisplayName: "Administrator", Role: "admin", PasswordHash: hash})
+	if err != nil {
+		return fmt.Errorf("create bootstrap admin: %w", err)
+	}
+	slog.Info("bootstrap admin created", "username", cfg.BootstrapAdminUsername)
+	return nil
 }
 
 func openDB(cfg config.Config) (*sql.DB, error) {

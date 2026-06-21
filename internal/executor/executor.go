@@ -87,6 +87,47 @@ type SSH struct {
 	Command     func(context.Context, string, ...string) *exec.Cmd
 }
 
+func (s SSH) Check(ctx context.Context, server domain.Server) repository.ServerResult {
+	start := time.Now()
+	if server.CredentialRef == "" || server.AuthType == "none" {
+		return failedResult(start, "auth_failed", "ssh credential is required", nil)
+	}
+	secret, err := s.Credentials.Secret(ctx, server.CredentialRef)
+	if err != nil {
+		return failedResult(start, "auth_failed", "credential is not available", nil)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	args, commandEnv, cleanup, err := sshAuth(server.AuthType, secret)
+	if err != nil {
+		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
+	}
+	defer cleanup()
+	args = append(args,
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=15",
+		"-p", fmt.Sprintf("%d", server.Port),
+		server.Username+"@"+server.Host,
+		"true",
+	)
+	cmd := s.command(ctx, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Env = append(os.Environ(), commandEnv...)
+	err = cmd.Run()
+	output := sanitize(stdout.String()+"\n"+stderr.String(), secret.Secret)
+	if err != nil {
+		code := 1
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return failedResult(start, "connect_timeout", "ssh connection timed out", &code)
+		}
+		return repository.ServerResult{Status: "failed", ExitCode: &code, DurationMS: int(time.Since(start).Milliseconds()), LogOutput: output, ErrorCode: "connect_failed", ErrorMessage: sanitize(err.Error(), secret.Secret)}
+	}
+	code := 0
+	return repository.ServerResult{Status: "success", ExitCode: &code, DurationMS: int(time.Since(start).Milliseconds()), LogOutput: output}
+}
+
 func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 	start := time.Now()
 	if req.Target.ScriptPath == "" {

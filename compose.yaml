@@ -24,6 +24,8 @@ services:
       MYSQL_DSN: ai_pub:ai_pub@tcp(mysql:3306)/ai_pub?parseTime=true&charset=utf8mb4&loc=UTC
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-dev-encryption-key}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ai-pub-dev-admin}
     depends_on:
       mysql:
         condition: service_healthy

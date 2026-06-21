@@ -219,6 +219,44 @@ func TestReleaseServiceM2Flow(t *testing.T) {
 	}
 }
 
+func TestReleaseServiceRetryCreatesNewReleaseAndPreflight(t *testing.T) {
+	_, store := newReleaseTestStore(t)
+	service := NewReleaseService(store)
+	ctx := context.Background()
+	fixture := createReleaseFixture(t, store)
+	original, err := store.CreateReleaseRequest(ctx, domain.ReleaseRequest{
+		ProjectID:          fixture.service.ProjectID,
+		ServiceID:          fixture.service.ID,
+		EnvironmentID:      fixture.testEnv.ID,
+		ServiceVersionID:   fixture.version.ID,
+		DeploymentTargetID: fixture.testTarget.ID,
+		Status:             "failed",
+		Source:             "web",
+		CreatedByType:      "user",
+		CreatedByID:        fixture.employee.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, preflight, err := service.Retry(ctx, original.ID, RetryInput{CreatedByType: "user", CreatedByID: fixture.employee.ID, IdempotencyKey: "retry-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.ID == original.ID || retry.Status != "pending_confirm" || preflight.Result != "pass" {
+		t.Fatalf("unexpected retry result: %#v / %#v", retry, preflight)
+	}
+	if !strings.Contains(retry.Metadata, original.ID) {
+		t.Fatalf("retry metadata must reference original: %s", retry.Metadata)
+	}
+	events, err := service.ListEvents(ctx, retry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasEvent(events, "release_retried") {
+		t.Fatalf("expected release_retried event, got %#v", events)
+	}
+}
+
 func TestReleaseServiceEffectivePolicy(t *testing.T) {
 	_, store := newReleaseTestStore(t)
 	service := NewReleaseService(store)
@@ -419,6 +457,15 @@ func countReleaseEventType(events []domain.ReleaseEvent, eventType string) int {
 func hasPreflightItem(result PreflightResult, code string, level string) bool {
 	for _, item := range result.Items {
 		if item.Code == code && item.Level == level {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEvent(events []domain.ReleaseEvent, eventType string) bool {
+	for _, event := range events {
+		if event.EventType == eventType {
 			return true
 		}
 	}

@@ -1,0 +1,1 @@
+-- SQLite column removal is intentionally unsupported in the MVP migration runner.

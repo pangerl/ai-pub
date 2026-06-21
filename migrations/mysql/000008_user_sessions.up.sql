@@ -1,0 +1,3 @@
+ALTER TABLE users
+  ADD COLUMN password_hash VARCHAR(512) NOT NULL DEFAULT '',
+  ADD COLUMN session_version INT NOT NULL DEFAULT 1;

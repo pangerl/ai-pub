@@ -38,16 +38,37 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"slug":          "test",
 		"is_production": false,
 	})
+	patchedEnvironment := patchForData(t, router, "/api/v1/environments/"+env["id"].(string), map[string]any{
+		"name": "测试环境（已更新）",
+	})
+	if patchedEnvironment["name"] != "测试环境（已更新）" {
+		t.Fatalf("expected patched environment, got %#v", patchedEnvironment)
+	}
 	server := postForData(t, router, "/api/v1/servers", map[string]any{
 		"name":      "mock-1",
 		"host":      "127.0.0.1",
 		"username":  "deploy",
 		"auth_type": "none",
 	})
+	patchedServer := patchForData(t, router, "/api/v1/servers/"+server["id"].(string), map[string]any{
+		"host":    "127.0.0.2",
+		"enabled": false,
+	})
+	if patchedServer["host"] != "127.0.0.2" || patchedServer["enabled"] != false {
+		t.Fatalf("expected patched server, got %#v", patchedServer)
+	}
+	server = patchForData(t, router, "/api/v1/servers/"+server["id"].(string), map[string]any{"enabled": true})
 	serverGroup := postForData(t, router, "/api/v1/server-groups", map[string]any{
 		"name":       "mock-group",
 		"server_ids": []string{server["id"].(string)},
 	})
+	patchedGroup := patchForData(t, router, "/api/v1/server-groups/"+serverGroup["id"].(string), map[string]any{
+		"description": "patched group",
+		"server_ids":  []string{server["id"].(string)},
+	})
+	if patchedGroup["description"] != "patched group" {
+		t.Fatalf("expected patched server group, got %#v", patchedGroup)
+	}
 	serverGroups := getForData(t, router, "/api/v1/server-groups")
 	serverGroupBytes, err := json.Marshal(serverGroups)
 	if err != nil {
@@ -80,6 +101,7 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"username":     "admin",
 		"display_name": "管理员",
 		"role":         "admin",
+		"password":     "local-test-password",
 	})
 	patchedUser := patchForData(t, router, "/api/v1/users/"+user["id"].(string), map[string]any{
 		"display_name": "发布管理员",

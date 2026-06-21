@@ -127,10 +127,10 @@ API Key scope：
 | `GET` | `/users` | 用户列表，管理员 |
 | `POST` | `/users` | 创建用户，管理员 |
 | `PATCH` | `/users/{id}` | 更新用户，管理员 |
-| `GET` | `/api-keys` | API Key 列表 |
-| `POST` | `/api-keys` | 创建 API Key |
-| `PATCH` | `/api-keys/{id}` | 禁用或更新 |
-| `DELETE` | `/api-keys/{id}` | 删除 |
+| `GET` | `/api-keys` | API Key 列表；普通用户仅返回自己的 Key，管理员返回全部 |
+| `POST` | `/api-keys` | 创建 API Key；普通用户的归属固定为当前用户 |
+| `PATCH` | `/api-keys/{id}` | 禁用或更新；普通用户只能操作自己的 Key |
+| `DELETE` | `/api-keys/{id}` | 删除；普通用户只能操作自己的 Key |
 
 API Key 创建响应只返回一次明文。
 

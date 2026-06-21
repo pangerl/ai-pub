@@ -210,6 +210,43 @@ func createEnvironment(store repository.Store) http.HandlerFunc {
 	}
 }
 
+func patchEnvironment(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		existing, err := store.GetEnvironment(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, r, http.StatusNotFound, "not_found", err)
+			return
+		}
+		var patch struct {
+			Name         *string `json:"name"`
+			Slug         *string `json:"slug"`
+			IsProduction *bool   `json:"is_production"`
+			Enabled      *bool   `json:"enabled"`
+		}
+		if !decodeJSON(w, r, &patch) {
+			return
+		}
+		if patch.Name != nil {
+			existing.Name = *patch.Name
+		}
+		if patch.Slug != nil {
+			existing.Slug = *patch.Slug
+		}
+		if patch.IsProduction != nil {
+			existing.IsProduction = *patch.IsProduction
+		}
+		if patch.Enabled != nil {
+			existing.Enabled = *patch.Enabled
+		}
+		item, err := store.UpdateEnvironment(r.Context(), existing.ID, existing)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, item)
+	}
+}
+
 func listServers(store repository.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		items, err := store.ListServers(r.Context())
@@ -236,6 +273,59 @@ func createServer(store repository.Store) http.HandlerFunc {
 	}
 }
 
+func patchServer(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		existing, err := store.GetServer(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, r, http.StatusNotFound, "not_found", err)
+			return
+		}
+		var patch struct {
+			Name          *string `json:"name"`
+			Host          *string `json:"host"`
+			Port          *int    `json:"port"`
+			Username      *string `json:"username"`
+			AuthType      *string `json:"auth_type"`
+			CredentialRef *string `json:"credential_ref"`
+			GatewayID     *string `json:"gateway_id"`
+			Enabled       *bool   `json:"enabled"`
+		}
+		if !decodeJSON(w, r, &patch) {
+			return
+		}
+		if patch.Name != nil {
+			existing.Name = *patch.Name
+		}
+		if patch.Host != nil {
+			existing.Host = *patch.Host
+		}
+		if patch.Port != nil {
+			existing.Port = *patch.Port
+		}
+		if patch.Username != nil {
+			existing.Username = *patch.Username
+		}
+		if patch.AuthType != nil {
+			existing.AuthType = *patch.AuthType
+		}
+		if patch.CredentialRef != nil {
+			existing.CredentialRef = *patch.CredentialRef
+		}
+		if patch.GatewayID != nil {
+			existing.GatewayID = *patch.GatewayID
+		}
+		if patch.Enabled != nil {
+			existing.Enabled = *patch.Enabled
+		}
+		item, err := store.UpdateServer(r.Context(), existing.ID, existing)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, item)
+	}
+}
+
 func listServerGroups(store repository.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		items, err := store.ListServerGroups(r.Context())
@@ -259,6 +349,43 @@ func createServerGroup(store repository.Store) http.HandlerFunc {
 			return
 		}
 		writeData(w, r, http.StatusCreated, item)
+	}
+}
+
+func patchServerGroup(store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		existing, err := store.GetServerGroup(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, r, http.StatusNotFound, "not_found", err)
+			return
+		}
+		var patch struct {
+			Name        *string   `json:"name"`
+			Description *string   `json:"description"`
+			ServerIDs   *[]string `json:"server_ids"`
+			Enabled     *bool     `json:"enabled"`
+		}
+		if !decodeJSON(w, r, &patch) {
+			return
+		}
+		if patch.Name != nil {
+			existing.Name = *patch.Name
+		}
+		if patch.Description != nil {
+			existing.Description = *patch.Description
+		}
+		if patch.ServerIDs != nil {
+			existing.ServerIDs = *patch.ServerIDs
+		}
+		if patch.Enabled != nil {
+			existing.Enabled = *patch.Enabled
+		}
+		item, err := store.UpdateServerGroup(r.Context(), existing.ID, existing)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, item)
 	}
 }
 
@@ -400,9 +527,36 @@ func patchUser(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func listAPIKeys(store repository.Store) http.HandlerFunc {
+func apiKeyManager(w http.ResponseWriter, r *http.Request, jwtSecret string) (domain.User, bool) {
+	if user, ok := currentSessionUser(r); ok {
+		return user, true
+	}
+	if jwtSecret == "" && r.Header.Get("Authorization") == "" {
+		return domain.User{Role: "admin"}, true
+	}
+	writeError(w, r, http.StatusUnauthorized, "unauthorized", errUnauthorized)
+	return domain.User{}, false
+}
+
+func canManageAPIKey(user domain.User, key domain.APIKey) bool {
+	return user.Role == "admin" || (key.OwnerType == "user" && key.OwnerID == user.ID)
+}
+
+func listAPIKeys(store repository.Store, jwtSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		items, err := store.ListAPIKeys(r.Context())
+		user, ok := apiKeyManager(w, r, jwtSecret)
+		if !ok {
+			return
+		}
+		var (
+			items []domain.APIKey
+			err   error
+		)
+		if user.Role == "admin" {
+			items, err = store.ListAPIKeys(r.Context())
+		} else {
+			items, err = store.ListAPIKeysByOwner(r.Context(), "user", user.ID)
+		}
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 			return
@@ -411,11 +565,19 @@ func listAPIKeys(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func createAPIKey(store repository.Store) http.HandlerFunc {
+func createAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := apiKeyManager(w, r, jwtSecret)
+		if !ok {
+			return
+		}
 		var input domain.APIKey
 		if !decodeJSON(w, r, &input) {
 			return
+		}
+		if user.Role != "admin" {
+			input.OwnerType = "user"
+			input.OwnerID = user.ID
 		}
 		item, err := store.CreateAPIKey(r.Context(), input)
 		if err != nil {
@@ -426,11 +588,19 @@ func createAPIKey(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func patchAPIKey(store repository.Store) http.HandlerFunc {
+func patchAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := apiKeyManager(w, r, jwtSecret)
+		if !ok {
+			return
+		}
 		existing, err := store.GetAPIKey(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		if !canManageAPIKey(user, existing) {
+			writeError(w, r, http.StatusForbidden, "forbidden", errForbidden)
 			return
 		}
 		var patch struct {
@@ -459,11 +629,24 @@ func patchAPIKey(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func deleteAPIKey(store repository.Store) http.HandlerFunc {
+func deleteAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := apiKeyManager(w, r, jwtSecret)
+		if !ok {
+			return
+		}
 		id := r.PathValue("id")
 		if err := requireID(id); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
+		existing, err := store.GetAPIKey(r.Context(), id)
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		if !canManageAPIKey(user, existing) {
+			writeError(w, r, http.StatusForbidden, "forbidden", errForbidden)
 			return
 		}
 		if err := store.DeleteAPIKey(r.Context(), id); err != nil {

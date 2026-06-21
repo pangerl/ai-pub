@@ -83,6 +83,14 @@ type RollbackInput struct {
 	APIKeyID         string `json:"api_key_id"`
 }
 
+type RetryInput struct {
+	Source         string `json:"source"`
+	CreatedByType  string `json:"created_by_type"`
+	CreatedByID    string `json:"created_by_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+	APIKeyID       string `json:"api_key_id"`
+}
+
 type PolicyInput struct {
 	ScopeType                string `json:"scope_type"`
 	ScopeID                  string `json:"scope_id"`
@@ -442,6 +450,42 @@ func (s ReleaseService) CreateRollback(ctx context.Context, releaseID string, in
 		Message:          "回滚发布单已创建",
 	})
 	s.notifyRollbackRequested(ctx, original, item)
+	return item, preflight, nil
+}
+
+func (s ReleaseService) Retry(ctx context.Context, releaseID string, input RetryInput) (domain.ReleaseRequest, PreflightResult, error) {
+	original, err := s.store.GetReleaseRequest(ctx, releaseID)
+	if err != nil {
+		return domain.ReleaseRequest{}, PreflightResult{}, err
+	}
+	if original.Status != "failed" && original.SummaryStatus != "partial" {
+		return domain.ReleaseRequest{}, PreflightResult{}, errors.New("only failed or partial releases can be retried")
+	}
+	item, preflight, err := s.Create(ctx, CreateReleaseInput{
+		PreflightInput: PreflightInput{
+			ServiceID:          original.ServiceID,
+			EnvironmentID:      original.EnvironmentID,
+			ServiceVersionID:   original.ServiceVersionID,
+			DeploymentTargetID: original.DeploymentTargetID,
+		},
+		Source:         chooseString(input.Source, "web"),
+		IdempotencyKey: input.IdempotencyKey,
+		CreatedByType:  chooseString(input.CreatedByType, "user"),
+		CreatedByID:    input.CreatedByID,
+		APIKeyID:       input.APIKeyID,
+		Metadata:       fmt.Sprintf(`{"type":"retry","retry_of_id":%q}`, releaseID),
+	})
+	if err != nil {
+		return domain.ReleaseRequest{}, preflight, err
+	}
+	_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
+		ReleaseRequestID: item.ID,
+		EventType:        "release_retried",
+		ActorType:        chooseString(input.CreatedByType, "user"),
+		ActorID:          input.CreatedByID,
+		APIKeyID:         input.APIKeyID,
+		Message:          "重新发布单已创建",
+	})
 	return item, preflight, nil
 }
 

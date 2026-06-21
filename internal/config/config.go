@@ -6,26 +6,30 @@ import (
 )
 
 type Config struct {
-	AppEnv             string
-	HTTPAddr           string
-	MySQLDSN           string
-	AppEncryptionKey   string
-	JWTSecret          string
-	MigrationAuto      bool
-	MigrationCheckOnly bool
-	WorkerEnabled      bool
+	AppEnv                 string
+	HTTPAddr               string
+	MySQLDSN               string
+	AppEncryptionKey       string
+	JWTSecret              string
+	BootstrapAdminUsername string
+	BootstrapAdminPassword string
+	MigrationAuto          bool
+	MigrationCheckOnly     bool
+	WorkerEnabled          bool
 }
 
 func Load() Config {
 	return Config{
-		AppEnv:             env("APP_ENV", "dev"),
-		HTTPAddr:           env("HTTP_ADDR", ":8080"),
-		MySQLDSN:           os.Getenv("MYSQL_DSN"),
-		AppEncryptionKey:   os.Getenv("APP_ENCRYPTION_KEY"),
-		JWTSecret:          env("JWT_SECRET", "dev-secret-change-me"),
-		MigrationAuto:      envBool("MIGRATION_AUTO", true),
-		MigrationCheckOnly: envBool("MIGRATION_CHECK_ONLY", false),
-		WorkerEnabled:      envBool("WORKER_ENABLED", true),
+		AppEnv:                 env("APP_ENV", "dev"),
+		HTTPAddr:               env("HTTP_ADDR", ":8080"),
+		MySQLDSN:               os.Getenv("MYSQL_DSN"),
+		AppEncryptionKey:       os.Getenv("APP_ENCRYPTION_KEY"),
+		JWTSecret:              env("JWT_SECRET", "dev-secret-change-me"),
+		BootstrapAdminUsername: env("BOOTSTRAP_ADMIN_USERNAME", "admin"),
+		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
+		MigrationAuto:          envBool("MIGRATION_AUTO", true),
+		MigrationCheckOnly:     envBool("MIGRATION_CHECK_ONLY", false),
+		WorkerEnabled:          envBool("WORKER_ENABLED", true),
 	}
 }
 

@@ -93,13 +93,15 @@ type DeploymentTarget struct {
 }
 
 type User struct {
-	ID          string    `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"display_name"`
+	Role           string    `json:"role"`
+	Enabled        bool      `json:"enabled"`
+	PasswordHash   string    `json:"-"`
+	SessionVersion int       `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type APIKey struct {

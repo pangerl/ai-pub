@@ -52,21 +52,28 @@ func createRelease(service app.ReleaseService, store repository.Store) http.Hand
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		key, ok, err := apiKeyFromBearer(store, r, "release:create")
-		if err != nil {
-			if errors.Is(err, errForbidden) {
-				writeError(w, r, http.StatusForbidden, "forbidden", err)
+		if user, ok := currentSessionUser(r); ok {
+			input.Source = "web"
+			input.CreatedByType = "user"
+			input.CreatedByID = user.ID
+			input.AuthorizedByUserID = ""
+		} else {
+			key, ok, err := apiKeyFromBearer(store, r, "release:create")
+			if err != nil {
+				if errors.Is(err, errForbidden) {
+					writeError(w, r, http.StatusForbidden, "forbidden", err)
+					return
+				}
+				writeError(w, r, http.StatusUnauthorized, "unauthorized", err)
 				return
 			}
-			writeError(w, r, http.StatusUnauthorized, "unauthorized", err)
-			return
-		}
-		if ok {
-			input.Source = "api"
-			input.CreatedByType = "api_key"
-			input.CreatedByID = key.ID
-			input.APIKeyID = key.ID
-			input.AuthorizedByUserID = ""
+			if ok {
+				input.Source = "api"
+				input.CreatedByType = "api_key"
+				input.CreatedByID = key.ID
+				input.APIKeyID = key.ID
+				input.AuthorizedByUserID = ""
+			}
 		}
 		if input.IdempotencyKey == "" {
 			input.IdempotencyKey = r.Header.Get("Idempotency-Key")
@@ -126,7 +133,9 @@ func confirmRelease(service app.ReleaseService, store repository.Store) http.Han
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
+		if user, ok := currentSessionUser(r); ok {
+			input.UserID = user.ID
+		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
 			return
 		} else if key.ID != "" {
 			input.APIKeyID = key.ID
@@ -159,7 +168,9 @@ func rejectRelease(service app.ReleaseService, store repository.Store) http.Hand
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
+		if user, ok := currentSessionUser(r); ok {
+			input.UserID = user.ID
+		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
 			return
 		} else if key.ID != "" {
 			input.APIKeyID = key.ID
@@ -179,7 +190,9 @@ func cancelRelease(service app.ReleaseService, store repository.Store) http.Hand
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
+		if user, ok := currentSessionUser(r); ok {
+			input.UserID = user.ID
+		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
 			return
 		} else if key.ID != "" {
 			input.APIKeyID = key.ID
@@ -213,7 +226,11 @@ func createRollbackRelease(service app.ReleaseService, store repository.Store) h
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		if key, ok := authorizeOptionalAPIKey(w, r, store, "release:rollback"); !ok {
+		if user, ok := currentSessionUser(r); ok {
+			input.Source = "web"
+			input.CreatedByType = "user"
+			input.CreatedByID = user.ID
+		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:rollback"); !ok {
 			return
 		} else if key.ID != "" {
 			input.Source = "api"
@@ -242,6 +259,44 @@ func createRollbackRelease(service app.ReleaseService, store repository.Store) h
 			"next_action": preflight.NextAction,
 			"preflight":   preflight,
 		})
+	}
+}
+
+func retryRelease(service app.ReleaseService, store repository.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var input app.RetryInput
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		if user, ok := currentSessionUser(r); ok {
+			input.Source = "web"
+			input.CreatedByType = "user"
+			input.CreatedByID = user.ID
+		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:create"); !ok {
+			return
+		} else if key.ID != "" {
+			input.Source = "api"
+			input.CreatedByType = "api_key"
+			input.CreatedByID = key.ID
+			input.APIKeyID = key.ID
+		}
+		if input.IdempotencyKey == "" {
+			input.IdempotencyKey = r.Header.Get("Idempotency-Key")
+		}
+		release, preflight, err := service.Retry(r.Context(), r.PathValue("id"), input)
+		if err != nil {
+			if errors.Is(err, app.ErrPreflightBlocked) {
+				writeError(w, r, http.StatusConflict, "preflight_blocked", err)
+				return
+			}
+			if errors.Is(err, app.ErrIdempotencyConflict) {
+				writeError(w, r, http.StatusConflict, "idempotency_conflict", err)
+				return
+			}
+			writeError(w, r, http.StatusBadRequest, "invalid_state", err)
+			return
+		}
+		writeData(w, r, http.StatusCreated, map[string]any{"release": release, "next_action": preflight.NextAction, "preflight": preflight})
 	}
 }
 

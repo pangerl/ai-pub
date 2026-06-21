@@ -9,10 +9,12 @@
 - Go 后端入口和 `/healthz`。
 - MySQL 配置加载和 migration runner。
 - React/Vite 前端工作台。
+- 用户名密码登录与 HttpOnly JWT 会话；未登录访问业务 API 会被拒绝。
+- 本地 Compose 首次启动会创建管理员；默认账号为 `admin`，默认密码为 `ai-pub-dev-admin`。请通过 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 覆盖，生产环境必须提供自己的值。
 - 核心 MySQL 表结构。
-- 项目、服务、版本、环境、服务器、服务器组、部署目标、用户和 API Key 基础 API。
+- 项目、服务、版本、环境、服务器、服务器组、部署目标、用户和访问密钥（API Key）基础 API。
 - 用户启用/禁用，禁用用户不能确认发布。
-- API Key 明文只在创建响应返回一次。
+- 访问密钥明文只在创建响应返回一次。
 - Bearer API Key 支持读取、创建、确认和回滚发布单，并校验 `release:read`、`release:create`、`release:confirm`、`release:rollback` scope。
 - Bearer API Key 支持发布前 preflight、驳回和取消，并分别校验 `release:create`、`release:confirm` scope。
 - Bearer API Key 支持读取部署记录和服务器日志，并校验 `deploy:read` scope。
@@ -44,12 +46,13 @@
 - 运维摘要 `/ops/summary`。
 - 前端支持初始化 Mock 配置、创建发布单、预检、确认入队、驳回、取消、创建回滚单、模拟失败发布。
 - 前端支持发布前预检结果展示。
-- 前端支持手动创建项目、服务、版本、环境、服务器、发布目标、确认用户、发布策略、通知配置、凭据、API Key 和发布日志查看。
+- 前端支持手动创建项目、服务、版本、环境、服务器、发布目标、确认用户、发布策略、通知配置、凭据、访问密钥和发布日志查看。
 - 前端支持创建服务器组，并使用 `server_group` 作为发布目标。
 - 前端支持通知测试和通知投递查看。
-- 前端工作台支持显式选择服务、环境、版本、部署目标和确认用户。
+- 前端以当前登录用户作为发布创建、确认、驳回、取消和回滚的操作者，不再允许通过页面切换确认身份。
+- 普通用户可在“个人访问密钥”页面管理自己的密钥；管理员可管理全部集成访问密钥，普通用户不能指定或操作其他用户的密钥。
 - 前端发布中心和发布记录支持按当前服务/环境、状态筛选。
-- 本地功能验证脚本覆盖驳回、取消、成功发布、服务器组发布、partial/skipped、失败发布、回滚、日志和事件。
+- 本地功能验证脚本覆盖驳回、取消、成功发布、服务器组发布、partial/skipped、失败发布、重新发布、回滚、日志和事件。
 
 后续优先做缺陷修复和少量交互打磨。真实 SSH 私钥与密码登录发布、企业微信机器人 webhook 发送均已完成测试验证；凭据能力增强仍可后续扩展。
 
@@ -80,13 +83,20 @@ make compose-down
 基础路径为 `/api/v1`：
 
 - `GET/POST /projects`
+- `POST /auth/login`
+- `GET /auth/me`
+- `POST /auth/logout`
 - `GET/PATCH /projects/{id}`
 - `GET/POST /services`
 - `GET/PATCH /services/{id}`
 - `GET/POST /services/{id}/versions`
 - `GET/POST /environments`
+- `PATCH /environments/{id}`
 - `GET/POST /servers`
+- `PATCH /servers/{id}`
+- `POST /servers/{id}/test`
 - `GET/POST /server-groups`
+- `PATCH /server-groups/{id}`
 - `GET/POST /deployment-targets`
 - `PATCH /deployment-targets/{id}`
 - `GET/POST /users`
@@ -108,6 +118,7 @@ make compose-down
 - `GET /release-requests/{id}/events`
 - `GET /release-requests/{id}/rollback-candidates`
 - `POST /release-requests/{id}/rollback`
+- `POST /release-requests/{id}/retry`
 - `GET /release-policies`
 - `POST /release-policies`
 - `GET /release-policies/effective`

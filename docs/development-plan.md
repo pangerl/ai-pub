@@ -228,9 +228,10 @@
 6. Mock/Dry-run 执行成功。
 7. 查看发布记录、服务器日志和事件流。
 8. 制造一次 Mock/Dry-run 失败，确认失败原因展示正确。
-9. 创建回滚发布单并完成 Mock/Dry-run 执行。
-10. 在本地确认通知配置、发送记录与发布事件可查询；真实 webhook 发送留待外部集成专项。
-11. 执行 `make local-check`，验证 MySQL migration 和 Mock/Dry-run 基础发布闭环。
+9. 对失败或部分成功的发布创建新的重新发布单，重新预检和确认。
+10. 创建回滚发布单并完成 Mock/Dry-run 执行。
+11. 在本地确认通知配置、发送记录与发布事件可查询；真实 webhook 发送留待外部集成专项。
+12. 执行 `make local-check`，验证 MySQL migration 和 Mock/Dry-run 基础发布闭环。
 
 ## 5. 验证命令要求
 

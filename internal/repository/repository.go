@@ -228,6 +228,22 @@ SELECT id, name, slug, is_production, enabled, created_at, updated_at FROM envir
 	return item, normalizeNotFound(err)
 }
 
+func (s Store) UpdateEnvironment(ctx context.Context, id string, item domain.Environment) (domain.Environment, error) {
+	existing, err := s.GetEnvironment(ctx, id)
+	if err != nil {
+		return domain.Environment{}, err
+	}
+	existing.Name = choose(item.Name, existing.Name)
+	existing.Slug = choose(item.Slug, existing.Slug)
+	existing.IsProduction = item.IsProduction
+	existing.Enabled = item.Enabled
+	existing.UpdatedAt = nowUTC()
+	_, err = s.db.ExecContext(ctx, `
+UPDATE environments SET name = ?, slug = ?, is_production = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Slug, boolInt(existing.IsProduction), boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
+	return existing, err
+}
+
 func (s Store) CreateServer(ctx context.Context, item domain.Server) (domain.Server, error) {
 	now := nowUTC()
 	if item.ID == "" {
@@ -271,6 +287,37 @@ SELECT id, name, host, port, username, auth_type, credential_ref, gateway_id, en
 FROM servers WHERE id = ?`, id)
 	item, err := scanServer(row)
 	return item, normalizeNotFound(err)
+}
+
+func (s Store) UpdateServer(ctx context.Context, id string, item domain.Server) (domain.Server, error) {
+	existing, err := s.GetServer(ctx, id)
+	if err != nil {
+		return domain.Server{}, err
+	}
+	existing.Name = choose(item.Name, existing.Name)
+	existing.Host = choose(item.Host, existing.Host)
+	if item.Port != 0 {
+		existing.Port = item.Port
+	}
+	existing.Username = choose(item.Username, existing.Username)
+	existing.AuthType = choose(item.AuthType, existing.AuthType)
+	existing.CredentialRef = item.CredentialRef
+	existing.GatewayID = item.GatewayID
+	existing.Enabled = item.Enabled
+	existing.UpdatedAt = nowUTC()
+	_, err = s.db.ExecContext(ctx, `
+UPDATE servers SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, credential_ref = ?, gateway_id = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Host, existing.Port, existing.Username, existing.AuthType, existing.CredentialRef, existing.GatewayID, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
+	return existing, err
+}
+
+func (s Store) UpdateServerCheck(ctx context.Context, id, status string) (domain.Server, error) {
+	now := nowUTC()
+	_, err := s.db.ExecContext(ctx, `UPDATE servers SET last_check_status = ?, last_check_at = ?, updated_at = ? WHERE id = ?`, status, formatTime(now), formatTime(now), id)
+	if err != nil {
+		return domain.Server{}, err
+	}
+	return s.GetServer(ctx, id)
 }
 
 func (s Store) CreateServerGroup(ctx context.Context, item domain.ServerGroup) (domain.ServerGroup, error) {
@@ -333,6 +380,50 @@ FROM server_groups ORDER BY created_at DESC, id DESC`)
 		items[i].ServerIDs = memberIDs
 	}
 	return items, nil
+}
+
+func (s Store) GetServerGroup(ctx context.Context, id string) (domain.ServerGroup, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, enabled, created_at, updated_at FROM server_groups WHERE id = ?`, id)
+	item, err := scanServerGroup(row)
+	if err != nil {
+		return domain.ServerGroup{}, normalizeNotFound(err)
+	}
+	item.ServerIDs, err = s.listServerGroupMembers(ctx, id)
+	return item, err
+}
+
+func (s Store) UpdateServerGroup(ctx context.Context, id string, item domain.ServerGroup) (domain.ServerGroup, error) {
+	existing, err := s.GetServerGroup(ctx, id)
+	if err != nil {
+		return domain.ServerGroup{}, err
+	}
+	existing.Name = choose(item.Name, existing.Name)
+	existing.Description = item.Description
+	existing.Enabled = item.Enabled
+	existing.UpdatedAt = nowUTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.ServerGroup{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE server_groups SET name = ?, description = ?, enabled = ?, updated_at = ? WHERE id = ?`, existing.Name, existing.Description, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id); err != nil {
+		return domain.ServerGroup{}, err
+	}
+	if item.ServerIDs != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM server_group_members WHERE server_group_id = ?`, id); err != nil {
+			return domain.ServerGroup{}, err
+		}
+		for _, serverID := range item.ServerIDs {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO server_group_members (server_group_id, server_id) VALUES (?, ?)`, id, serverID); err != nil {
+				return domain.ServerGroup{}, err
+			}
+		}
+		existing.ServerIDs = item.ServerIDs
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ServerGroup{}, err
+	}
+	return existing, nil
 }
 
 func (s Store) listServerGroupMembers(ctx context.Context, groupID string) ([]string, error) {
@@ -458,6 +549,25 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 	return item, err
 }
 
+func (s Store) CreateUserWithPassword(ctx context.Context, item domain.User) (domain.User, error) {
+	now := nowUTC()
+	if item.ID == "" {
+		item.ID = domain.NewID("user")
+	}
+	if item.Role == "" {
+		item.Role = "employee"
+	}
+	item.Enabled = true
+	item.SessionVersion = 1
+	item.CreatedAt = now
+	item.UpdatedAt = now
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO users (id, username, display_name, role, enabled, password_hash, session_version, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.Username, item.DisplayName, item.Role, boolInt(item.Enabled), item.PasswordHash, item.SessionVersion, formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+	return item, err
+}
+
 func (s Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, username, display_name, role, enabled, created_at, updated_at
@@ -485,11 +595,32 @@ func (s Store) UpdateUser(ctx context.Context, id string, item domain.User) (dom
 	existing.DisplayName = choose(item.DisplayName, existing.DisplayName)
 	existing.Role = choose(item.Role, existing.Role)
 	existing.Enabled = item.Enabled
+	existing.SessionVersion++
 	existing.UpdatedAt = nowUTC()
 	_, err = s.db.ExecContext(ctx, `
-UPDATE users SET display_name = ?, role = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+UPDATE users SET display_name = ?, role = ?, enabled = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?`,
 		existing.DisplayName, existing.Role, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
 	return existing, err
+}
+
+func (s Store) GetUserByUsername(ctx context.Context, username string) (domain.User, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, username, display_name, role, enabled, password_hash, session_version, created_at, updated_at
+FROM users WHERE username = ?`, username)
+	item, err := scanUserWithCredentials(row)
+	return item, normalizeNotFound(err)
+}
+
+func (s Store) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
+}
+
+func (s Store) SetUserPassword(ctx context.Context, id, passwordHash string) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE users SET password_hash = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?`, passwordHash, formatTime(nowUTC()), id)
+	return err
 }
 
 func (s Store) CreateAPIKey(ctx context.Context, item domain.APIKey) (APIKeyWithPlaintext, error) {
@@ -523,6 +654,25 @@ func (s Store) ListAPIKeys(ctx context.Context) ([]domain.APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, name, prefix, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
 FROM api_keys ORDER BY created_at DESC, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.APIKey{}
+	for rows.Next() {
+		item, err := scanAPIKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s Store) ListAPIKeysByOwner(ctx context.Context, ownerType, ownerID string) ([]domain.APIKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, name, prefix, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
+FROM api_keys WHERE owner_type = ? AND owner_id = ? ORDER BY created_at DESC, id DESC`, ownerType, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -686,6 +836,20 @@ func scanUser(row rowScanner) (domain.User, error) {
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, err
+}
+
+func scanUserWithCredentials(row rowScanner) (domain.User, error) {
+	var item domain.User
+	var enabled int
+	var createdAt, updatedAt string
+	err := row.Scan(&item.ID, &item.Username, &item.DisplayName, &item.Role, &enabled, &item.PasswordHash, &item.SessionVersion, &createdAt, &updatedAt)
+	if err != nil {
+		return domain.User{}, err
+	}
+	item.Enabled = enabled != 0
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	return item, nil
 }
 
 func scanAPIKey(row rowScanner) (domain.APIKey, error) {
