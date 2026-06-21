@@ -44,16 +44,25 @@ func run() error {
 	}
 	defer db.Close()
 
-	runner := migration.NewRunner(db, "mysql", os.DirFS("."))
-	report, err := runner.Run(context.Background(), cfg.MigrationCheckOnly)
-	if err != nil {
-		return err
-	}
 	if cfg.MigrationCheckOnly {
+		runner := migration.NewRunner(db, "mysql", os.DirFS("."))
+		report, err := runner.Run(context.Background(), true)
+		if err != nil {
+			return err
+		}
 		slog.Info("migration check complete", "pending", len(report.Pending), "applied", len(report.Applied))
 		return nil
 	}
-	slog.Info("migration complete", "applied", len(report.Applied))
+	if cfg.MigrationAuto {
+		runner := migration.NewRunner(db, "mysql", os.DirFS("."))
+		report, err := runner.Run(context.Background(), false)
+		if err != nil {
+			return err
+		}
+		slog.Info("migration complete", "applied", len(report.Applied))
+	} else {
+		slog.Info("migration skipped", "reason", "MIGRATION_AUTO=false")
+	}
 	if err := ensureBootstrapAdmin(context.Background(), repository.NewStore(db), cfg); err != nil {
 		return err
 	}

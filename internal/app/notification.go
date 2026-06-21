@@ -163,7 +163,7 @@ func (s NotificationService) decryptSecret(config repository.NotificationSecret)
 }
 
 func (s NotificationService) sendOne(ctx context.Context, config repository.NotificationSecret, event NotificationEvent) (domain.NotificationDelivery, error) {
-	err := s.sender.Send(ctx, config.WebhookURL, event.Content)
+	err := s.sender.Send(ctx, config.WebhookURL, config.Secret, event.Content)
 	if err != nil {
 		err = errors.New(sanitizeNotificationError(err.Error(), config.WebhookURL, config.Secret))
 	}

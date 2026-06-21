@@ -261,7 +261,6 @@ NotificationConfig 1 -- n NotificationDelivery
 | `scope_id` | 作用域 ID，system 时为空 |
 | `confirm_mode` | `self_confirm` / `admin_confirm` |
 | `manual_freeze_enabled` | 是否冻结 |
-| `ssh_realtime_check_required` | 是否要求实时 SSH 检查 |
 | `created_at` / `updated_at` | 时间 |
 
 合并规则：

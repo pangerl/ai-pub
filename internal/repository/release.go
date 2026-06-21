@@ -26,7 +26,7 @@ FROM service_versions WHERE id = ?`, id)
 
 func (s Store) ListReleasePolicies(ctx context.Context) ([]domain.ReleasePolicy, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, scope_type, scope_id, confirm_mode, manual_freeze_enabled, ssh_realtime_check_required, created_at, updated_at
+SELECT id, scope_type, scope_id, confirm_mode, manual_freeze_enabled, created_at, updated_at
 FROM release_policies ORDER BY scope_type, scope_id`)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ FROM release_policies ORDER BY scope_type, scope_id`)
 
 func (s Store) GetReleasePolicy(ctx context.Context, scopeType string, scopeID string) (domain.ReleasePolicy, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, scope_type, scope_id, confirm_mode, manual_freeze_enabled, ssh_realtime_check_required, created_at, updated_at
+SELECT id, scope_type, scope_id, confirm_mode, manual_freeze_enabled, created_at, updated_at
 FROM release_policies WHERE scope_type = ? AND scope_id = ?`, scopeType, scopeID)
 	item, err := scanReleasePolicy(row)
 	return item, normalizeNotFound(err)
@@ -60,12 +60,11 @@ func (s Store) UpsertReleasePolicy(ctx context.Context, item domain.ReleasePolic
 	if err == nil {
 		existing.ConfirmMode = choose(item.ConfirmMode, existing.ConfirmMode)
 		existing.ManualFreezeEnabled = item.ManualFreezeEnabled
-		existing.SSHRealtimeCheckRequired = item.SSHRealtimeCheckRequired
 		existing.UpdatedAt = now
 		_, err = s.db.ExecContext(ctx, `
-UPDATE release_policies SET confirm_mode = ?, manual_freeze_enabled = ?, ssh_realtime_check_required = ?, updated_at = ?
+UPDATE release_policies SET confirm_mode = ?, manual_freeze_enabled = ?, updated_at = ?
 WHERE id = ?`,
-			existing.ConfirmMode, boolInt(existing.ManualFreezeEnabled), boolInt(existing.SSHRealtimeCheckRequired), formatTime(existing.UpdatedAt), existing.ID)
+			existing.ConfirmMode, boolInt(existing.ManualFreezeEnabled), formatTime(existing.UpdatedAt), existing.ID)
 		return existing, err
 	}
 	if err != ErrNotFound {
@@ -74,9 +73,9 @@ WHERE id = ?`,
 	item.CreatedAt = now
 	item.UpdatedAt = now
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO release_policies (id, scope_type, scope_id, confirm_mode, manual_freeze_enabled, ssh_realtime_check_required, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.ScopeType, item.ScopeID, item.ConfirmMode, boolInt(item.ManualFreezeEnabled), boolInt(item.SSHRealtimeCheckRequired), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+INSERT INTO release_policies (id, scope_type, scope_id, confirm_mode, manual_freeze_enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.ScopeType, item.ScopeID, item.ConfirmMode, boolInt(item.ManualFreezeEnabled), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
 	return item, err
 }
 
@@ -367,11 +366,10 @@ func targetSnapshot(target domain.DeploymentTarget, servers []domain.Server) str
 
 func scanReleasePolicy(row rowScanner) (domain.ReleasePolicy, error) {
 	var item domain.ReleasePolicy
-	var freeze, sshCheck int
+	var freeze int
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.ScopeType, &item.ScopeID, &item.ConfirmMode, &freeze, &sshCheck, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.ScopeType, &item.ScopeID, &item.ConfirmMode, &freeze, &createdAt, &updatedAt)
 	item.ManualFreezeEnabled = freeze == 1
-	item.SSHRealtimeCheckRequired = sshCheck == 1
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, err

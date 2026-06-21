@@ -126,7 +126,8 @@ API Key scope：
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `POST` | `/auth/login` | 登录 |
-| `GET` | `/me` | 当前用户 |
+| `GET` | `/auth/me` | 当前用户 |
+| `POST` | `/auth/logout` | 退出登录 |
 | `GET` | `/users` | 用户列表，管理员 |
 | `POST` | `/users` | 创建用户，管理员 |
 | `PATCH` | `/users/{id}` | 更新用户，管理员 |
@@ -165,11 +166,14 @@ API Key 创建响应只返回一次明文。
 |------|------|------|
 | `GET` | `/environments` | 环境列表 |
 | `POST` | `/environments` | 创建环境 |
+| `PATCH` | `/environments/{id}` | 更新环境 |
 | `GET` | `/servers` | 服务器列表 |
 | `POST` | `/servers` | 创建服务器 |
-| `POST` | `/servers/{id}/test-connection` | 测试 SSH 连接 |
+| `PATCH` | `/servers/{id}` | 更新服务器 |
+| `POST` | `/servers/{id}/test` | 测试 SSH 连接 |
 | `GET` | `/server-groups` | 服务器组列表 |
 | `POST` | `/server-groups` | 创建服务器组 |
+| `PATCH` | `/server-groups/{id}` | 更新服务器组 |
 | `GET` | `/deployment-targets` | 部署目标列表 |
 | `POST` | `/deployment-targets` | 创建部署目标 |
 | `PATCH` | `/deployment-targets/{id}` | 更新部署目标 |
@@ -267,6 +271,7 @@ POST /release-requests/{id}/preflight
 | `POST` | `/release-requests/{id}/confirm` | 确认并入队 |
 | `POST` | `/release-requests/{id}/reject` | 驳回 |
 | `POST` | `/release-requests/{id}/cancel` | 取消 queued 前发布 |
+| `POST` | `/release-requests/{id}/retry` | 创建重新发布单 |
 
 约束：
 
@@ -280,6 +285,7 @@ POST /release-requests/{id}/preflight
 |------|------|------|
 | `GET` | `/release-requests/{id}/rollback-candidates` | 推荐回滚版本 |
 | `POST` | `/release-requests/{id}/rollback` | 创建回滚发布单 |
+| `GET` | `/release-requests/{id}/events` | 发布事件 |
 
 回滚发布单复用同一套 preflight、策略、确认、审计流程。
 
@@ -297,12 +303,21 @@ POST /release-requests/{id}/preflight
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/release-policies` | 策略列表 |
-| `PUT` | `/release-policies/{id}` | 更新策略 |
-| `POST` | `/release-policies/effective` | 查询最终生效策略 |
+| `POST` | `/release-policies` | 创建或更新策略 |
+| `GET` | `/release-policies/effective?service_id={id}&environment_id={id}` | 查询最终生效策略 |
 | `POST` | `/release-policies/freeze` | 打开冻结 |
 | `POST` | `/release-policies/unfreeze` | 关闭冻结 |
 
 ## 11. 通知配置 API
+
+### 11.1 凭据
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/credentials` | 凭据列表，不返回 secret |
+| `POST` | `/credentials` | 创建凭据 |
+
+### 11.2 通知
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -316,10 +331,8 @@ POST /release-requests/{id}/preflight
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/healthz` | 健康检查 |
+| `GET` | `/healthz`（不带 `/api/v1` 前缀） | 健康检查 |
 | `GET` | `/ops/summary` | 运行摘要 |
-| `GET` | `/ops/migrations` | migration 状态 |
-| `GET` | `/ops/metrics` | 指标 |
 
 运维接口不得泄漏密钥和敏感配置。
 

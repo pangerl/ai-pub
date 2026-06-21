@@ -129,14 +129,13 @@ type Credential struct {
 }
 
 type ReleasePolicy struct {
-	ID                       string    `json:"id"`
-	ScopeType                string    `json:"scope_type"`
-	ScopeID                  string    `json:"scope_id"`
-	ConfirmMode              string    `json:"confirm_mode"`
-	ManualFreezeEnabled      bool      `json:"manual_freeze_enabled"`
-	SSHRealtimeCheckRequired bool      `json:"ssh_realtime_check_required"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	ScopeType           string    `json:"scope_type"`
+	ScopeID             string    `json:"scope_id"`
+	ConfirmMode         string    `json:"confirm_mode"`
+	ManualFreezeEnabled bool      `json:"manual_freeze_enabled"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type ReleaseRequest struct {

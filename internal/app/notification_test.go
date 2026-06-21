@@ -17,6 +17,9 @@ func TestNotificationServiceSendsAndRecordsDelivery(t *testing.T) {
 	calls := 0
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
+		if req.URL.Query().Get("timestamp") == "" || req.URL.Query().Get("sign") == "" {
+			t.Fatal("expected signed webhook request")
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"errcode":0,"errmsg":"ok"}`)),
@@ -29,6 +32,7 @@ func TestNotificationServiceSendsAndRecordsDelivery(t *testing.T) {
 		Name:       "wecom",
 		Channel:    "wecom_robot",
 		WebhookURL: "http://wecom.test/webhook",
+		Secret:     "signing-secret",
 	})
 	if err != nil {
 		t.Fatal(err)

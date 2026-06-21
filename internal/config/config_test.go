@@ -29,3 +29,11 @@ func TestProdRequiresSecrets(t *testing.T) {
 		t.Fatal("expected prod config without secrets to fail")
 	}
 }
+
+func TestMigrationAutoCanBeDisabled(t *testing.T) {
+	t.Setenv("MIGRATION_AUTO", "false")
+
+	if Load().MigrationAuto {
+		t.Fatal("expected MIGRATION_AUTO=false to disable automatic migrations")
+	}
+}

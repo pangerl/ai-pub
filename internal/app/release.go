@@ -95,11 +95,10 @@ type RetryInput struct {
 }
 
 type PolicyInput struct {
-	ScopeType                string `json:"scope_type"`
-	ScopeID                  string `json:"scope_id"`
-	ConfirmMode              string `json:"confirm_mode"`
-	ManualFreezeEnabled      bool   `json:"manual_freeze_enabled"`
-	SSHRealtimeCheckRequired bool   `json:"ssh_realtime_check_required"`
+	ScopeType           string `json:"scope_type"`
+	ScopeID             string `json:"scope_id"`
+	ConfirmMode         string `json:"confirm_mode"`
+	ManualFreezeEnabled bool   `json:"manual_freeze_enabled"`
 }
 
 var ErrPreflightBlocked = errors.New("preflight blocked")
@@ -570,11 +569,10 @@ func (s ReleaseService) SavePolicy(ctx context.Context, input PolicyInput) (doma
 		input.ConfirmMode = "self_confirm"
 	}
 	return s.store.UpsertReleasePolicy(ctx, domain.ReleasePolicy{
-		ScopeType:                input.ScopeType,
-		ScopeID:                  input.ScopeID,
-		ConfirmMode:              input.ConfirmMode,
-		ManualFreezeEnabled:      input.ManualFreezeEnabled,
-		SSHRealtimeCheckRequired: input.SSHRealtimeCheckRequired,
+		ScopeType:           input.ScopeType,
+		ScopeID:             input.ScopeID,
+		ConfirmMode:         input.ConfirmMode,
+		ManualFreezeEnabled: input.ManualFreezeEnabled,
 	})
 }
 
