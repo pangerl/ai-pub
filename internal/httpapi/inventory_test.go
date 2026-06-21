@@ -241,21 +241,17 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"name":       "Confirm",
 		"owner_type": "user",
 		"owner_id":   user["id"],
-		"scopes":     `["release:confirm"]`,
+		"scopes":     `["release:create","release:confirm"]`,
 	})
-	confirmTarget := postForData(t, router, "/api/v1/release-requests", map[string]any{
+	confirmTarget := postForStatusWithHeaders(t, router, "/api/v1/release-requests", map[string]any{
 		"service_id":           service["id"],
 		"environment_id":       env["id"],
 		"service_version_id":   version["id"],
 		"deployment_target_id": target["id"],
-		"created_by_type":      "user",
-		"created_by_id":        user["id"],
 		"idempotency_key":      "api-key-confirm-target",
-	})
+	}, http.StatusCreated, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
 	confirmRelease := confirmTarget["release"].(map[string]any)
-	confirmedByKey := postForStatusWithHeaders(t, router, "/api/v1/release-requests/"+confirmRelease["id"].(string)+"/confirm", map[string]any{
-		"user_id": user["id"],
-	}, http.StatusOK, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
+	confirmedByKey := postForStatusWithHeaders(t, router, "/api/v1/release-requests/"+confirmRelease["id"].(string)+"/confirm", map[string]any{}, http.StatusOK, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
 	if confirmedByKey["status"] != "queued" {
 		t.Fatalf("expected api key confirmed release to be queued, got %#v", confirmedByKey)
 	}
@@ -267,19 +263,16 @@ func TestInventoryAPIFlow(t *testing.T) {
 	if !bytes.Contains(confirmEventBytes, []byte(confirmKey["key"].(map[string]any)["id"].(string))) || !bytes.Contains(confirmEventBytes, []byte("api_key_id")) {
 		t.Fatalf("expected api key id in release_confirmed event, got %s", confirmEventBytes)
 	}
-	rejectTarget := postForData(t, router, "/api/v1/release-requests", map[string]any{
+	rejectTarget := postForStatusWithHeaders(t, router, "/api/v1/release-requests", map[string]any{
 		"service_id":           service["id"],
 		"environment_id":       env["id"],
 		"service_version_id":   version["id"],
 		"deployment_target_id": target["id"],
-		"created_by_type":      "user",
-		"created_by_id":        user["id"],
 		"idempotency_key":      "api-key-reject-target",
-	})
+	}, http.StatusCreated, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
 	rejectRelease := rejectTarget["release"].(map[string]any)
 	rejectedByKey := postForStatusWithHeaders(t, router, "/api/v1/release-requests/"+rejectRelease["id"].(string)+"/reject", map[string]any{
-		"user_id": user["id"],
-		"reason":  "api key reject",
+		"reason": "api key reject",
 	}, http.StatusOK, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
 	if rejectedByKey["status"] != "rejected" {
 		t.Fatalf("expected api key rejected release, got %#v", rejectedByKey)
@@ -292,19 +285,15 @@ func TestInventoryAPIFlow(t *testing.T) {
 	if !bytes.Contains(rejectEventBytes, []byte(confirmKey["key"].(map[string]any)["id"].(string))) || !bytes.Contains(rejectEventBytes, []byte("api_key_id")) {
 		t.Fatalf("expected api key id in release_rejected event, got %s", rejectEventBytes)
 	}
-	cancelTarget := postForData(t, router, "/api/v1/release-requests", map[string]any{
+	cancelTarget := postForStatusWithHeaders(t, router, "/api/v1/release-requests", map[string]any{
 		"service_id":           service["id"],
 		"environment_id":       env["id"],
 		"service_version_id":   version["id"],
 		"deployment_target_id": target["id"],
-		"created_by_type":      "user",
-		"created_by_id":        user["id"],
 		"idempotency_key":      "api-key-cancel-target",
-	})
+	}, http.StatusCreated, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
 	cancelRelease := cancelTarget["release"].(map[string]any)
-	cancelledByKey := postForStatusWithHeaders(t, router, "/api/v1/release-requests/"+cancelRelease["id"].(string)+"/cancel", map[string]any{
-		"user_id": user["id"],
-	}, http.StatusOK, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
+	cancelledByKey := postForStatusWithHeaders(t, router, "/api/v1/release-requests/"+cancelRelease["id"].(string)+"/cancel", map[string]any{}, http.StatusOK, map[string]string{"Authorization": "Bearer " + confirmKey["plaintext"].(string)})
 	if cancelledByKey["status"] != "cancelled" {
 		t.Fatalf("expected api key cancelled release, got %#v", cancelledByKey)
 	}

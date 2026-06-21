@@ -15,9 +15,9 @@
 - 项目、服务、版本、环境、服务器、服务器组、部署目标、用户和访问密钥（API Key）基础 API。
 - 用户启用/禁用，禁用用户不能确认发布。
 - 访问密钥明文只在创建响应返回一次。
-- Bearer API Key 支持读取、创建、确认和回滚发布单，并校验 `release:read`、`release:create`、`release:confirm`、`release:rollback` scope。
+- Bearer API Key 支持读取基础库存、发布单和部署记录，并分别校验 `inventory:read`、`release:read`、`deploy:read` scope。
+- Bearer API Key 支持创建、确认和回滚非生产发布单，并校验 `release:create`、`release:confirm`、`release:rollback` scope；生产确认必须使用管理员会话。
 - Bearer API Key 支持发布前 preflight、驳回和取消，并分别校验 `release:create`、`release:confirm` scope。
-- Bearer API Key 支持读取部署记录和服务器日志，并校验 `deploy:read` scope。
 - Bearer API Key 管理基础配置、API Key、凭据、通知和发布策略时校验 `admin:write` scope。
 - API Key 调用写入发布事件 `api_key_id` 审计字段。
 - 发布单幂等键重复提交返回首次发布单，关键字段变化返回 409 冲突。

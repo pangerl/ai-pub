@@ -326,6 +326,76 @@ func TestReleaseServiceRejectsDisabledConfirmUser(t *testing.T) {
 	}
 }
 
+func TestReleaseServiceAPIKeyActorCannotImpersonateUsers(t *testing.T) {
+	_, store := newReleaseTestStore(t)
+	service := NewReleaseService(store)
+	ctx := context.Background()
+	fixture := createReleaseFixture(t, store)
+
+	created, _, err := service.Create(ctx, CreateReleaseInput{
+		PreflightInput: PreflightInput{
+			ServiceID:          fixture.service.ID,
+			EnvironmentID:      fixture.testEnv.ID,
+			ServiceVersionID:   fixture.version.ID,
+			DeploymentTargetID: fixture.testTarget.ID,
+		},
+		Source:        "api",
+		CreatedByType: "api_key",
+		CreatedByID:   "key_ci",
+		APIKeyID:      "key_ci",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := service.Confirm(ctx, created.ID, ConfirmInput{Actor: Actor{Type: "api_key", ID: "key_ci", APIKeyID: "key_ci"}})
+	if err != nil || queued.Status != "queued" {
+		t.Fatalf("api key self confirmation got release=%#v err=%v", queued, err)
+	}
+	events, err := service.ListEvents(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events[len(events)-1].ActorType != "api_key" || events[len(events)-1].ActorID != "key_ci" {
+		t.Fatalf("expected api key actor, got %#v", events[len(events)-1])
+	}
+
+	userRelease, _, err := service.Create(ctx, CreateReleaseInput{
+		PreflightInput: PreflightInput{
+			ServiceID:          fixture.service.ID,
+			EnvironmentID:      fixture.testEnv.ID,
+			ServiceVersionID:   fixture.version.ID,
+			DeploymentTargetID: fixture.testTarget.ID,
+		},
+		CreatedByType: "user",
+		CreatedByID:   fixture.employee.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Confirm(ctx, userRelease.ID, ConfirmInput{Actor: Actor{Type: "api_key", ID: "key_ci", APIKeyID: "key_ci"}}); err == nil {
+		t.Fatal("expected api key to be unable to confirm another actor's release")
+	}
+
+	prodRelease, _, err := service.Create(ctx, CreateReleaseInput{
+		PreflightInput: PreflightInput{
+			ServiceID:          fixture.service.ID,
+			EnvironmentID:      fixture.prodEnv.ID,
+			ServiceVersionID:   fixture.version.ID,
+			DeploymentTargetID: fixture.prodTarget.ID,
+		},
+		Source:        "api",
+		CreatedByType: "api_key",
+		CreatedByID:   "key_ci",
+		APIKeyID:      "key_ci",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Confirm(ctx, prodRelease.ID, ConfirmInput{Actor: Actor{Type: "api_key", ID: "key_ci", APIKeyID: "key_ci"}}); err == nil {
+		t.Fatal("expected production api key confirmation to be rejected")
+	}
+}
+
 func TestReleaseServiceCancelIsRepeatSafe(t *testing.T) {
 	_, store := newReleaseTestStore(t)
 	service := NewReleaseService(store)

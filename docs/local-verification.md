@@ -66,7 +66,7 @@ curl -X POST http://127.0.0.1:18080/api/v1/release-requests \
   -d '{"service_id":"...","environment_id":"...","service_version_id":"...","deployment_target_id":"..."}'
 ```
 
-API Key 读取发布单、事件和回滚候选需要 `release:read`，发布前 preflight 和创建发布单需要 `release:create`，创建发布单会记录创建时的 `preflight_checked` 事件，已有发布单 preflight 需要 `release:read` 并会再次写入 `preflight_checked` 事件，确认、驳回、取消发布单需要 `release:confirm`，创建回滚单需要 `release:rollback`，读取部署记录和服务器日志需要 `deploy:read`，管理基础配置、API Key、凭据、通知和发布策略需要 `admin:write`。用户禁用后不能确认发布；通过 API Key 创建、确认、驳回、取消或回滚发布单时，事件流会记录 `api_key_id`；禁用、过期或 scope 不足会被拒绝。
+API Key 读取项目、服务、环境、服务器和部署目标需要 `inventory:read`；读取发布单、事件和回滚候选需要 `release:read`；发布前 preflight 和创建发布单需要 `release:create`。已有发布单 preflight 需要 `release:read` 并会再次写入 `preflight_checked` 事件；确认、驳回、取消发布单需要 `release:confirm`，且 API Key 只能操作自身创建的非生产发布，生产确认必须使用管理员会话。创建回滚单需要 `release:rollback`，读取部署记录和服务器日志需要 `deploy:read`，管理基础配置、API Key、凭据、通知和发布策略需要 `admin:write`。scope 仅接受已定义枚举，不支持 `*` 或未知值；普通用户不能授予 `admin:write`，更新时只能缩小 scope 集合。用户禁用后不能确认发布；通过 API Key 发起的发布动作事件以 `api_key` 作为 actor 并记录 `api_key_id`；禁用、过期或 scope 不足会被拒绝。
 
 通知链路的本地验证以 `go test ./internal/app ./internal/httpapi ./internal/e2e` 为准，覆盖通知配置创建、启用/禁用、发送记录、生产待管理员确认通知、发布失败通知触发入口、回滚申请通知触发入口，以及通知发送成功/失败写入发布事件流。
 

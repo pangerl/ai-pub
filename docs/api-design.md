@@ -97,11 +97,14 @@ API Key scope：
 | `release:confirm` | 确认、驳回、取消发布单 |
 | `release:rollback` | 创建回滚发布单 |
 | `deploy:read` | 读取执行状态和服务器日志 |
+| `inventory:read` | 读取项目、服务、版本、环境、服务器和部署目标 |
 | `admin:write` | 管理基础配置和高风险配置 |
 
 约束：
 
 - API Key 即使具备 `release:confirm`，也不能绕过生产管理员确认。
+- scope 必须是上表中的唯一值；不支持 `*` 或未知 scope。
+- 只有管理员会话可以创建或授予 `admin:write`；普通用户更新自己的 Key 时只能缩小 scope 集合。
 - 所有触发真实发布的 API 必须进入统一发布流程。
 
 ## 5. 错误码

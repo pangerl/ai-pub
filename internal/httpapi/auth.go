@@ -16,10 +16,16 @@ import (
 const sessionCookieName = "ai_pub_session"
 
 type sessionUserContextKey struct{}
+type apiKeyContextKey struct{}
 
 func currentSessionUser(r *http.Request) (domain.User, bool) {
 	user, ok := r.Context().Value(sessionUserContextKey{}).(domain.User)
 	return user, ok
+}
+
+func currentAPIKey(r *http.Request) (domain.APIKey, bool) {
+	key, ok := r.Context().Value(apiKeyContextKey{}).(domain.APIKey)
+	return key, ok
 }
 
 func requireSessionOrAPIKey(store repository.Store, jwtSecret string, next http.Handler) http.Handler {
@@ -42,7 +48,12 @@ func requireSessionOrAPIKey(store repository.Store, jwtSecret string, next http.
 			}
 		}
 		if strings.TrimSpace(r.Header.Get("Authorization")) != "" {
-			next.ServeHTTP(w, r)
+			key, _, err := apiKeyFromBearer(store, r, "")
+			if err != nil {
+				writeError(w, r, http.StatusUnauthorized, "unauthorized", err)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), apiKeyContextKey{}, key)))
 			return
 		}
 		writeError(w, r, http.StatusUnauthorized, "unauthorized", errUnauthorized)
@@ -76,6 +87,12 @@ var (
 )
 
 func apiKeyFromBearer(store repository.Store, r *http.Request, requiredScope string) (domain.APIKey, bool, error) {
+	if key, ok := currentAPIKey(r); ok {
+		if requiredScope != "" && !apiKeyHasScope(key, requiredScope) {
+			return domain.APIKey{}, true, errForbidden
+		}
+		return key, true, nil
+	}
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if header == "" {
 		return domain.APIKey{}, false, nil
@@ -94,7 +111,7 @@ func apiKeyFromBearer(store repository.Store, r *http.Request, requiredScope str
 	if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now().UTC()) {
 		return domain.APIKey{}, true, errUnauthorized
 	}
-	if !apiKeyHasScope(key, requiredScope) {
+	if requiredScope != "" && !apiKeyHasScope(key, requiredScope) {
 		return domain.APIKey{}, true, errForbidden
 	}
 	if err := store.TouchAPIKeyLastUsed(r.Context(), key.ID); err != nil {
@@ -109,7 +126,7 @@ func apiKeyHasScope(key domain.APIKey, required string) bool {
 		return false
 	}
 	for _, scope := range scopes {
-		if scope == required || scope == "*" {
+		if scope == required {
 			return true
 		}
 	}

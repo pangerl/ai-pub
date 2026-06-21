@@ -429,7 +429,7 @@ running -> failed
 | `release_request_id` | 发布单，可空 |
 | `deploy_record_id` | 发布记录，可空 |
 | `event_type` | 事件类型 |
-| `actor_type` | `user` / `ai_agent` / `service_account` / `system` |
+| `actor_type` | `user` / `api_key` / `ai_agent` / `service_account` / `system` |
 | `actor_id` | 主体 ID |
 | `authorized_user_id` | 授权用户，可空 |
 | `api_key_id` | API Key，可空 |

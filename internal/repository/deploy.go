@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"ai-pub/internal/domain"
 )
@@ -25,6 +27,15 @@ type ServerResult struct {
 	ErrorCode    string
 	ErrorMessage string
 }
+
+type RecoveredDeploy struct {
+	RecordID  string
+	ReleaseID string
+}
+
+const DeployLeaseDuration = 10 * time.Minute
+
+var ErrLeaseLost = errors.New("deploy lease lost")
 
 func (s Store) ClaimNextDeploy(ctx context.Context, workerID string) (ClaimedDeploy, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -61,15 +72,34 @@ LIMIT 1`)
 		return ClaimedDeploy{}, normalizeNotFound(err)
 	}
 	now := nowUTC()
-	if _, err := tx.ExecContext(ctx, `
-UPDATE deploy_records SET status = 'running', worker_id = ?, started_at = ?, heartbeat_at = ?, updated_at = ? WHERE id = ?`,
-		workerID, formatTime(now), formatTime(now), formatTime(now), record.ID); err != nil {
+	leaseExpiresAt := now.Add(DeployLeaseDuration)
+	res, err := tx.ExecContext(ctx, `
+UPDATE deploy_records
+SET status = 'running', worker_id = ?, lease_expires_at = ?, started_at = ?, heartbeat_at = ?, updated_at = ?
+WHERE id = ? AND status = 'queued'`,
+		workerID, formatTime(leaseExpiresAt), formatTime(now), formatTime(now), formatTime(now), record.ID)
+	if err != nil {
 		return ClaimedDeploy{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE release_requests SET status = 'running', updated_at = ? WHERE id = ?`,
-		formatTime(now), record.ReleaseRequestID); err != nil {
+	affected, err := res.RowsAffected()
+	if err != nil {
 		return ClaimedDeploy{}, err
+	}
+	if affected != 1 {
+		return ClaimedDeploy{}, ErrNotFound
+	}
+	res, err = tx.ExecContext(ctx, `
+UPDATE release_requests SET status = 'running', updated_at = ? WHERE id = ? AND status = 'queued'`,
+		formatTime(now), record.ReleaseRequestID)
+	if err != nil {
+		return ClaimedDeploy{}, err
+	}
+	affected, err = res.RowsAffected()
+	if err != nil {
+		return ClaimedDeploy{}, err
+	}
+	if affected != 1 {
+		return ClaimedDeploy{}, ErrNotFound
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE server_deploy_logs SET status = 'running', started_at = ? WHERE deploy_record_id = ? AND status = 'queued'`,
@@ -95,6 +125,106 @@ UPDATE server_deploy_logs SET status = 'running', started_at = ? WHERE deploy_re
 	record.Status = "running"
 	record.WorkerID = workerID
 	return ClaimedDeploy{Release: release, Record: record, Target: target, Version: version, Servers: servers}, nil
+}
+
+func (s Store) HeartbeatDeploy(ctx context.Context, deployRecordID, workerID string) error {
+	now := nowUTC()
+	res, err := s.db.ExecContext(ctx, `
+UPDATE deploy_records
+SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+WHERE id = ? AND status = 'running' AND worker_id = ?`,
+		formatTime(now), formatTime(now.Add(DeployLeaseDuration)), formatTime(now), deployRecordID, workerID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrLeaseLost
+	}
+	return nil
+}
+
+func (s Store) RecoverExpiredDeploys(ctx context.Context) ([]RecoveredDeploy, error) {
+	now := nowUTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
+SELECT id, release_request_id
+FROM deploy_records
+WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?`, formatTime(now))
+	if err != nil {
+		return nil, err
+	}
+	candidates := []RecoveredDeploy{}
+	for rows.Next() {
+		var item RecoveredDeploy
+		if err := rows.Scan(&item.RecordID, &item.ReleaseID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	recovered := []RecoveredDeploy{}
+	for _, item := range candidates {
+		res, err := tx.ExecContext(ctx, `
+UPDATE deploy_records
+SET status = 'failed', finished_at = ?, error_summary = ?, updated_at = ?
+WHERE id = ? AND status = 'running' AND lease_expires_at < ?`,
+			formatTime(now), "worker lease expired", formatTime(now), item.RecordID, formatTime(now))
+		if err != nil {
+			return nil, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected != 1 {
+			continue
+		}
+		recovered = append(recovered, item)
+		if _, err := tx.ExecContext(ctx, `
+UPDATE server_deploy_logs
+SET status = 'failed', finished_at = ?, error_code = 'worker_lease_expired', error_message = ?
+WHERE deploy_record_id = ? AND status IN ('queued', 'running')`,
+			formatTime(now), "worker lease expired", item.RecordID); err != nil {
+			return nil, err
+		}
+		var success, failed, skipped int
+		if err := tx.QueryRowContext(ctx, `
+SELECT
+  COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0)
+FROM server_deploy_logs WHERE deploy_record_id = ?`, item.RecordID).Scan(&success, &failed, &skipped); err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE deploy_records
+SET success_servers = ?, failed_servers = ?, skipped_servers = ?
+WHERE id = ?`, success, failed, skipped, item.RecordID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE release_requests
+SET status = 'failed', summary_status = 'failed', summary_message = ?, updated_at = ?
+WHERE id = ? AND status = 'running'`,
+			"worker lease expired", formatTime(now), item.ReleaseID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return recovered, nil
 }
 
 func (s Store) resolveDeploySnapshot(ctx context.Context, record domain.DeployRecord, targetID string) (domain.DeploymentTarget, []domain.Server, error) {
@@ -202,7 +332,7 @@ SELECT service_id, environment_id, service_version_id FROM release_requests WHER
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE deploy_records
-SET status = ?, success_servers = ?, failed_servers = ?, skipped_servers = ?, finished_at = ?, error_summary = ?, updated_at = ?
+SET status = ?, success_servers = ?, failed_servers = ?, skipped_servers = ?, lease_expires_at = NULL, finished_at = ?, error_summary = ?, updated_at = ?
 WHERE id = ?`,
 		status, counts["success"], counts["failed"], counts["skipped"], formatTime(now), errorSummary, formatTime(now), deployRecordID); err != nil {
 		return domain.DeployRecord{}, err

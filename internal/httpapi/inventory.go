@@ -579,6 +579,10 @@ func createAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 			input.OwnerType = "user"
 			input.OwnerID = user.ID
 		}
+		if err := validateAPIKeyScopes(input.Scopes, user.Role == "admin"); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
 		item, err := store.CreateAPIKey(r.Context(), input)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
@@ -615,6 +619,14 @@ func patchAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 			existing.Name = *patch.Name
 		}
 		if patch.Scopes != nil {
+			if err := validateAPIKeyScopes(*patch.Scopes, user.Role == "admin"); err != nil {
+				writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+				return
+			}
+			if user.Role != "admin" && !scopesAreSubset(*patch.Scopes, existing.Scopes) {
+				writeError(w, r, http.StatusForbidden, "forbidden", errors.New("non-admin api key scopes may only be reduced"))
+				return
+			}
 			existing.Scopes = *patch.Scopes
 		}
 		if patch.Enabled != nil {
@@ -627,6 +639,57 @@ func patchAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 		}
 		writeData(w, r, http.StatusOK, item)
 	}
+}
+
+var allowedAPIKeyScopes = map[string]bool{
+	"inventory:read":   true,
+	"release:read":     true,
+	"release:create":   true,
+	"release:confirm":  true,
+	"release:rollback": true,
+	"deploy:read":      true,
+	"admin:write":      true,
+}
+
+func validateAPIKeyScopes(raw string, isAdmin bool) error {
+	var scopes []string
+	if err := json.Unmarshal([]byte(raw), &scopes); err != nil {
+		return errors.New("scopes must be a JSON array")
+	}
+	if scopes == nil {
+		return errors.New("scopes must be a JSON array")
+	}
+	seen := make(map[string]bool, len(scopes))
+	for _, scope := range scopes {
+		if !allowedAPIKeyScopes[scope] {
+			return errors.New("unsupported api key scope")
+		}
+		if seen[scope] {
+			return errors.New("duplicate api key scope")
+		}
+		if scope == "admin:write" && !isAdmin {
+			return errors.New("non-admin cannot grant admin:write")
+		}
+		seen[scope] = true
+	}
+	return nil
+}
+
+func scopesAreSubset(nextRaw, currentRaw string) bool {
+	var next, current []string
+	if json.Unmarshal([]byte(nextRaw), &next) != nil || json.Unmarshal([]byte(currentRaw), &current) != nil {
+		return false
+	}
+	allowed := make(map[string]bool, len(current))
+	for _, scope := range current {
+		allowed[scope] = true
+	}
+	for _, scope := range next {
+		if !allowed[scope] {
+			return false
+		}
+	}
+	return true
 }
 
 func deleteAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {

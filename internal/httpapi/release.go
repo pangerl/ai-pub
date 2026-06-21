@@ -134,11 +134,11 @@ func confirmRelease(service app.ReleaseService, store repository.Store) http.Han
 			return
 		}
 		if user, ok := currentSessionUser(r); ok {
-			input.UserID = user.ID
+			input.Actor = app.Actor{Type: "user", ID: user.ID}
 		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
 			return
 		} else if key.ID != "" {
-			input.APIKeyID = key.ID
+			input.Actor = app.Actor{Type: "api_key", ID: key.ID, APIKeyID: key.ID}
 		}
 		item, err := service.Confirm(r.Context(), r.PathValue("id"), input)
 		if err != nil {
@@ -150,6 +150,9 @@ func confirmRelease(service app.ReleaseService, store repository.Store) http.Han
 }
 
 func authorizeOptionalAPIKey(w http.ResponseWriter, r *http.Request, store repository.Store, scope string) (domain.APIKey, bool) {
+	if _, ok := currentSessionUser(r); ok {
+		return domain.APIKey{}, true
+	}
 	key, _, err := apiKeyFromBearer(store, r, scope)
 	if err == nil {
 		return key, true
@@ -169,11 +172,11 @@ func rejectRelease(service app.ReleaseService, store repository.Store) http.Hand
 			return
 		}
 		if user, ok := currentSessionUser(r); ok {
-			input.UserID = user.ID
+			input.Actor = app.Actor{Type: "user", ID: user.ID}
 		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
 			return
 		} else if key.ID != "" {
-			input.APIKeyID = key.ID
+			input.Actor = app.Actor{Type: "api_key", ID: key.ID, APIKeyID: key.ID}
 		}
 		item, err := service.Reject(r.Context(), r.PathValue("id"), input)
 		if err != nil {
@@ -191,11 +194,11 @@ func cancelRelease(service app.ReleaseService, store repository.Store) http.Hand
 			return
 		}
 		if user, ok := currentSessionUser(r); ok {
-			input.UserID = user.ID
+			input.Actor = app.Actor{Type: "user", ID: user.ID}
 		} else if key, ok := authorizeOptionalAPIKey(w, r, store, "release:confirm"); !ok {
 			return
 		} else if key.ID != "" {
-			input.APIKeyID = key.ID
+			input.Actor = app.Actor{Type: "api_key", ID: key.ID, APIKeyID: key.ID}
 		}
 		item, err := service.Cancel(r.Context(), r.PathValue("id"), input)
 		if err != nil {

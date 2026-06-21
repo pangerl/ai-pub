@@ -81,7 +81,8 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	}
 	var keyResponse struct {
 		Data struct {
-			Key domain.APIKey `json:"key"`
+			Key       domain.APIKey `json:"key"`
+			Plaintext string        `json:"plaintext"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(keyRecorder.Body.Bytes(), &keyResponse); err != nil {
@@ -89,6 +90,66 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	}
 	if keyResponse.Data.Key.OwnerID != employee.ID || keyResponse.Data.Key.OwnerType != "user" {
 		t.Fatalf("employee must not choose API key owner: %#v", keyResponse.Data.Key)
+	}
+	for _, scopes := range []string{`["admin:write"]`, `["*"]`, `["unknown:scope"]`} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"invalid","scopes":`+scopes+`}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("employee key scopes %s got %d: %s", scopes, recorder.Code, recorder.Body.String())
+		}
+	}
+	if apiKeyHasScope(domain.APIKey{Scopes: `["*"]`}, "admin:write") {
+		t.Fatal("legacy wildcard scope must not authorize requests")
+	}
+	patchRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/api-keys/"+keyResponse.Data.Key.ID, bytes.NewBufferString(`{"scopes":"[\"release:create\",\"release:read\"]"}`))
+	patchRequest.Header.Set("Content-Type", "application/json")
+	patchRequest.AddCookie(cookie)
+	patchRecorder := httptest.NewRecorder()
+	router.ServeHTTP(patchRecorder, patchRequest)
+	if patchRecorder.Code != http.StatusForbidden {
+		t.Fatalf("employee scope expansion got %d: %s", patchRecorder.Code, patchRecorder.Body.String())
+	}
+
+	invalidBearer := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	invalidBearer.Header.Set("Authorization", "Bearer not-a-real-key")
+	invalidBearerRecorder := httptest.NewRecorder()
+	router.ServeHTTP(invalidBearerRecorder, invalidBearer)
+	if invalidBearerRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid bearer got %d: %s", invalidBearerRecorder.Code, invalidBearerRecorder.Body.String())
+	}
+
+	inventoryKeyRequest := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"inventory","scopes":"[\"inventory:read\"]"}`))
+	inventoryKeyRequest.Header.Set("Content-Type", "application/json")
+	inventoryKeyRequest.AddCookie(cookie)
+	inventoryKeyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(inventoryKeyRecorder, inventoryKeyRequest)
+	if inventoryKeyRecorder.Code != http.StatusCreated {
+		t.Fatalf("inventory key create got %d: %s", inventoryKeyRecorder.Code, inventoryKeyRecorder.Body.String())
+	}
+	var inventoryKeyResponse struct {
+		Data struct {
+			Plaintext string `json:"plaintext"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(inventoryKeyRecorder.Body.Bytes(), &inventoryKeyResponse); err != nil {
+		t.Fatal(err)
+	}
+	inventoryRead := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	inventoryRead.Header.Set("Authorization", "Bearer "+inventoryKeyResponse.Data.Plaintext)
+	inventoryReadRecorder := httptest.NewRecorder()
+	router.ServeHTTP(inventoryReadRecorder, inventoryRead)
+	if inventoryReadRecorder.Code != http.StatusOK {
+		t.Fatalf("inventory key read got %d: %s", inventoryReadRecorder.Code, inventoryReadRecorder.Body.String())
+	}
+	releaseKeyRead := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	releaseKeyRead.Header.Set("Authorization", "Bearer "+keyResponse.Data.Plaintext)
+	releaseKeyReadRecorder := httptest.NewRecorder()
+	router.ServeHTTP(releaseKeyReadRecorder, releaseKeyRead)
+	if releaseKeyReadRecorder.Code != http.StatusForbidden {
+		t.Fatalf("release key inventory read got %d: %s", releaseKeyReadRecorder.Code, releaseKeyReadRecorder.Body.String())
 	}
 
 	listKeysRequest := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys", nil)
@@ -104,7 +165,14 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	if err := json.Unmarshal(listKeysRecorder.Body.Bytes(), &listKeysResponse); err != nil {
 		t.Fatal(err)
 	}
-	if len(listKeysResponse.Data) != 1 || listKeysResponse.Data[0].ID != keyResponse.Data.Key.ID {
+	foundInitial := false
+	for _, key := range listKeysResponse.Data {
+		if key.OwnerID != employee.ID || key.OwnerType != "user" {
+			t.Fatalf("employee should only see own keys, got %#v", listKeysResponse.Data)
+		}
+		foundInitial = foundInitial || key.ID == keyResponse.Data.Key.ID
+	}
+	if !foundInitial {
 		t.Fatalf("employee should only see own key, got %#v", listKeysResponse.Data)
 	}
 

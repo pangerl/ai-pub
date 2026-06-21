@@ -172,7 +172,7 @@ func (s Store) RejectRelease(ctx context.Context, id string, userID string, reas
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
 UPDATE release_requests
-SET status = 'rejected', rejected_by_user_id = ?, rejected_reason = ?, updated_at = ?
+SET status = 'rejected', rejected_by_user_id = NULLIF(?, ''), rejected_reason = ?, updated_at = ?
 WHERE id = ? AND status = 'pending_confirm'`, userID, reason, formatTime(now), id)
 	if err != nil {
 		return domain.ReleaseRequest{}, err
@@ -241,7 +241,7 @@ func (s Store) ConfirmAndQueueRelease(ctx context.Context, releaseID string, use
 	}
 	res, err := tx.ExecContext(ctx, `
 UPDATE release_requests
-SET status = 'queued', confirmed_by_user_id = ?, confirmed_at = ?, updated_at = ?
+SET status = 'queued', confirmed_by_user_id = NULLIF(?, ''), confirmed_at = ?, updated_at = ?
 WHERE id = ? AND status = 'pending_confirm'`,
 		userID, formatTime(now), formatTime(now), releaseID)
 	if err != nil {

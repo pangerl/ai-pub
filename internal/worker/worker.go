@@ -48,10 +48,26 @@ func (s Service) RunLoop(ctx context.Context, interval time.Duration) {
 }
 
 func (s Service) RunOnce(ctx context.Context) error {
+	recovered, err := s.store.RecoverExpiredDeploys(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range recovered {
+		_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
+			ReleaseRequestID: item.ReleaseID,
+			DeployRecordID:   item.RecordID,
+			EventType:        "deploy_finished",
+			ActorType:        "system",
+			ActorID:          s.workerID,
+			Message:          "发布因 Worker 租约过期失败",
+		})
+	}
 	claimed, err := s.store.ClaimNextDeploy(ctx, s.workerID)
 	if err != nil {
 		return err
 	}
+	execCtx, stopHeartbeat, heartbeatErrors := s.startHeartbeat(ctx, claimed.Record.ID)
+	defer stopHeartbeat()
 	_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
 		ReleaseRequestID: claimed.Release.ID,
 		DeployRecordID:   claimed.Record.ID,
@@ -65,7 +81,10 @@ func (s Service) RunOnce(ctx context.Context) error {
 		if failed {
 			break
 		}
-		result := s.execute(ctx, claimed, server)
+		result := s.execute(execCtx, claimed, server)
+		if err := heartbeatError(heartbeatErrors); err != nil {
+			return err
+		}
 		if err := s.store.MarkServerFinished(ctx, claimed.Record.ID, server.ID, result); err != nil {
 			return err
 		}
@@ -83,6 +102,9 @@ func (s Service) RunOnce(ctx context.Context) error {
 		if err := s.store.MarkQueuedServersSkipped(ctx, claimed.Record.ID, "skipped after previous server failure"); err != nil {
 			return err
 		}
+	}
+	if err := heartbeatError(heartbeatErrors); err != nil {
+		return err
 	}
 	record, err := s.store.FinishDeploy(ctx, claimed.Record.ID)
 	if err != nil {
@@ -105,6 +127,46 @@ func (s Service) RunOnce(ctx context.Context) error {
 		Message:          "发布执行结束：" + record.Status,
 	})
 	return nil
+}
+
+func (s Service) startHeartbeat(ctx context.Context, deployRecordID string) (context.Context, func(), <-chan error) {
+	execCtx, cancel := context.WithCancel(ctx)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	errs := make(chan error, 1)
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			case <-ticker.C:
+				if err := s.store.HeartbeatDeploy(ctx, deployRecordID, s.workerID); err != nil {
+					errs <- err
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return execCtx, func() {
+		close(stop)
+		<-done
+		cancel()
+	}, errs
+}
+
+func heartbeatError(errs <-chan error) error {
+	select {
+	case err := <-errs:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, server domain.Server) repository.ServerResult {

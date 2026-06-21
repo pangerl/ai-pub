@@ -61,17 +61,20 @@ type CreateReleaseInput struct {
 type ConfirmInput struct {
 	UserID   string `json:"user_id"`
 	APIKeyID string `json:"api_key_id"`
+	Actor    Actor  `json:"-"`
 }
 
 type RejectInput struct {
 	UserID   string `json:"user_id"`
 	Reason   string `json:"reason"`
 	APIKeyID string `json:"api_key_id"`
+	Actor    Actor  `json:"-"`
 }
 
 type CancelInput struct {
 	UserID   string `json:"user_id"`
 	APIKeyID string `json:"api_key_id"`
+	Actor    Actor  `json:"-"`
 }
 
 type RollbackInput struct {
@@ -317,24 +320,39 @@ func (s ReleaseService) Confirm(ctx context.Context, id string, input ConfirmInp
 	if preflight.Result == "block" {
 		return domain.ReleaseRequest{}, errors.New("preflight blocked")
 	}
-	user, err := s.store.GetUser(ctx, input.UserID)
-	if err != nil {
-		return domain.ReleaseRequest{}, err
-	}
-	if !user.Enabled {
-		return domain.ReleaseRequest{}, errors.New("user is disabled")
-	}
-	if preflight.ConfirmMode == "self_confirm" && release.CreatedByID != input.UserID {
-		return domain.ReleaseRequest{}, errors.New("non-production release requires creator self confirmation")
-	}
-	if preflight.ConfirmMode == "admin_confirm" && user.Role != "admin" {
-		return domain.ReleaseRequest{}, errors.New("production release requires admin confirmation")
+	actor := input.actor()
+	confirmedByUserID := ""
+	switch actor.Type {
+	case "user":
+		user, err := s.store.GetUser(ctx, actor.ID)
+		if err != nil {
+			return domain.ReleaseRequest{}, err
+		}
+		if !user.Enabled {
+			return domain.ReleaseRequest{}, errors.New("user is disabled")
+		}
+		if preflight.ConfirmMode == "self_confirm" && (release.CreatedByType != "user" || release.CreatedByID != user.ID) {
+			return domain.ReleaseRequest{}, errors.New("non-production release requires creator self confirmation")
+		}
+		if preflight.ConfirmMode == "admin_confirm" && user.Role != "admin" {
+			return domain.ReleaseRequest{}, errors.New("production release requires admin confirmation")
+		}
+		confirmedByUserID = user.ID
+	case "api_key":
+		if preflight.ConfirmMode == "admin_confirm" {
+			return domain.ReleaseRequest{}, errors.New("production release requires admin session confirmation")
+		}
+		if release.CreatedByType != "api_key" || release.CreatedByID != actor.ID {
+			return domain.ReleaseRequest{}, errors.New("api key may only confirm its own release")
+		}
+	default:
+		return domain.ReleaseRequest{}, errors.New("release actor is required")
 	}
 	target, err := s.store.GetDeploymentTarget(ctx, release.DeploymentTargetID)
 	if err != nil {
 		return domain.ReleaseRequest{}, err
 	}
-	updated, record, err := s.store.ConfirmAndQueueRelease(ctx, id, input.UserID, target)
+	updated, record, err := s.store.ConfirmAndQueueRelease(ctx, id, confirmedByUserID, target)
 	if err != nil {
 		return domain.ReleaseRequest{}, err
 	}
@@ -342,25 +360,33 @@ func (s ReleaseService) Confirm(ctx context.Context, id string, input ConfirmInp
 		ReleaseRequestID: updated.ID,
 		DeployRecordID:   record.ID,
 		EventType:        "release_confirmed",
-		ActorType:        "user",
-		ActorID:          input.UserID,
-		APIKeyID:         input.APIKeyID,
+		ActorType:        actor.Type,
+		ActorID:          actor.ID,
+		APIKeyID:         actor.APIKeyID,
 		Message:          "发布单已确认并入队",
 	})
 	return updated, nil
 }
 
 func (s ReleaseService) Reject(ctx context.Context, id string, input RejectInput) (domain.ReleaseRequest, error) {
-	updated, err := s.store.RejectRelease(ctx, id, input.UserID, input.Reason)
+	release, err := s.store.GetReleaseRequest(ctx, id)
+	if err != nil {
+		return domain.ReleaseRequest{}, err
+	}
+	actor := input.actor()
+	if err := validateReleaseActionActor(release, actor); err != nil {
+		return domain.ReleaseRequest{}, err
+	}
+	updated, err := s.store.RejectRelease(ctx, id, actionUserID(actor), input.Reason)
 	if err != nil {
 		return domain.ReleaseRequest{}, err
 	}
 	_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
 		ReleaseRequestID: updated.ID,
 		EventType:        "release_rejected",
-		ActorType:        "user",
-		ActorID:          input.UserID,
-		APIKeyID:         input.APIKeyID,
+		ActorType:        actor.Type,
+		ActorID:          actor.ID,
+		APIKeyID:         actor.APIKeyID,
 		Message:          input.Reason,
 	})
 	return updated, nil
@@ -377,7 +403,11 @@ func (s ReleaseService) Cancel(ctx context.Context, id string, input CancelInput
 	if current.Status != "pending_confirm" && current.Status != "queued" {
 		return current, nil
 	}
-	updated, err := s.store.CancelRelease(ctx, id, input.UserID)
+	actor := input.actor()
+	if err := validateReleaseActionActor(current, actor); err != nil {
+		return domain.ReleaseRequest{}, err
+	}
+	updated, err := s.store.CancelRelease(ctx, id, actionUserID(actor))
 	if err != nil {
 		return domain.ReleaseRequest{}, err
 	}
@@ -387,12 +417,51 @@ func (s ReleaseService) Cancel(ctx context.Context, id string, input CancelInput
 	_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
 		ReleaseRequestID: updated.ID,
 		EventType:        "release_cancelled",
-		ActorType:        "user",
-		ActorID:          input.UserID,
-		APIKeyID:         input.APIKeyID,
+		ActorType:        actor.Type,
+		ActorID:          actor.ID,
+		APIKeyID:         actor.APIKeyID,
 		Message:          "发布单已取消",
 	})
 	return updated, nil
+}
+
+func (input ConfirmInput) actor() Actor {
+	return releaseActionActor(input.Actor, input.UserID, input.APIKeyID)
+}
+
+func (input RejectInput) actor() Actor {
+	return releaseActionActor(input.Actor, input.UserID, input.APIKeyID)
+}
+
+func (input CancelInput) actor() Actor {
+	return releaseActionActor(input.Actor, input.UserID, input.APIKeyID)
+}
+
+func releaseActionActor(actor Actor, userID, apiKeyID string) Actor {
+	if actor.Type != "" {
+		return actor
+	}
+	if apiKeyID != "" {
+		return Actor{Type: "api_key", ID: apiKeyID, APIKeyID: apiKeyID}
+	}
+	return Actor{Type: "user", ID: userID, APIKeyID: apiKeyID}
+}
+
+func validateReleaseActionActor(release domain.ReleaseRequest, actor Actor) error {
+	if actor.Type == "user" && actor.ID != "" {
+		return nil
+	}
+	if actor.Type == "api_key" && release.CreatedByType == "api_key" && release.CreatedByID == actor.ID {
+		return nil
+	}
+	return errors.New("api key may only act on its own release")
+}
+
+func actionUserID(actor Actor) string {
+	if actor.Type == "user" {
+		return actor.ID
+	}
+	return ""
 }
 
 func (s ReleaseService) ListEvents(ctx context.Context, releaseID string) ([]domain.ReleaseEvent, error) {

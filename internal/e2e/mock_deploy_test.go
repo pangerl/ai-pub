@@ -268,6 +268,46 @@ func TestSQLiteCancelQueuedReleaseCancelsDeployRecord(t *testing.T) {
 	}
 }
 
+func TestSQLiteWorkerRecoversExpiredLease(t *testing.T) {
+	db, store := newE2EStore(t)
+	ctx := context.Background()
+	fixture := seedE2E(t, store)
+	releases := app.NewReleaseService(store)
+	queued := createQueuedRelease(t, ctx, releases, fixture, fixture.successTarget)
+	claimed, err := store.ClaimNextDeploy(ctx, "worker_one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE deploy_records SET lease_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`, claimed.Record.ID); err != nil {
+		t.Fatal(err)
+	}
+	workerService := worker.NewService(store, app.NewCredentialService(store, crypto.NewBox("test-encryption-key")), nil, "worker_two")
+	if err := workerService.RunOnce(ctx); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected recovery then no queued work, got %v", err)
+	}
+	record, err := store.GetDeployRecord(ctx, claimed.Record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != "failed" || record.FailedServers != 1 {
+		t.Fatalf("expected expired record failed, got %#v", record)
+	}
+	release, err := store.GetReleaseRequest(ctx, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if release.Status != "failed" || release.SummaryMessage != "worker lease expired" {
+		t.Fatalf("expected expired release failed, got %#v", release)
+	}
+	logs, err := store.ListServerDeployLogs(ctx, claimed.Record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Status != "failed" || logs[0].ErrorCode != "worker_lease_expired" {
+		t.Fatalf("expected expired server log failed, got %#v", logs)
+	}
+}
+
 func TestSQLiteMockDeployFailureSendsNotification(t *testing.T) {
 	db, store := newE2EStore(t)
 	ctx := context.Background()
