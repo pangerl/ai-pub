@@ -116,10 +116,9 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"enabled": true,
 	})
 	keyBody := postForData(t, router, "/api/v1/api-keys", map[string]any{
-		"name":       "CI",
-		"owner_type": "user",
-		"owner_id":   user["id"],
-		"scopes":     `["release:create"]`,
+		"name":          "CI",
+		"owner_user_id": user["id"],
+		"scopes":        `["release:create"]`,
 	})
 	if keyBody["plaintext"] == "" {
 		t.Fatal("expected plaintext api key on create response")
@@ -139,10 +138,9 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"slug": "forbidden-admin-project",
 	}, http.StatusForbidden, map[string]string{"Authorization": "Bearer " + keyBody["plaintext"].(string)})
 	adminKey := postForData(t, router, "/api/v1/api-keys", map[string]any{
-		"name":       "Admin",
-		"owner_type": "user",
-		"owner_id":   user["id"],
-		"scopes":     `["admin:write"]`,
+		"name":          "Admin",
+		"owner_user_id": user["id"],
+		"scopes":        `["admin:write"]`,
 	})
 	adminProject := postForStatusWithHeaders(t, router, "/api/v1/projects", map[string]any{
 		"name": "Admin Project",
@@ -195,10 +193,9 @@ func TestInventoryAPIFlow(t *testing.T) {
 		t.Fatalf("expected api key id and preflight_checked in create events, got %s", apiEventBytes)
 	}
 	readOnlyKey := postForData(t, router, "/api/v1/api-keys", map[string]any{
-		"name":       "Read Only",
-		"owner_type": "user",
-		"owner_id":   user["id"],
-		"scopes":     `["release:read"]`,
+		"name":          "Read Only",
+		"owner_user_id": user["id"],
+		"scopes":        `["release:read"]`,
 	})
 	readReleases := getForDataWithHeaders(t, router, "/api/v1/release-requests", map[string]string{"Authorization": "Bearer " + readOnlyKey["plaintext"].(string)})
 	if readReleases == nil {
@@ -229,19 +226,17 @@ func TestInventoryAPIFlow(t *testing.T) {
 		"idempotency_key": "api-key-rollback-forbidden",
 	}, http.StatusForbidden, map[string]string{"Authorization": "Bearer " + readOnlyKey["plaintext"].(string)})
 	rollbackKey := postForData(t, router, "/api/v1/api-keys", map[string]any{
-		"name":       "Rollback",
-		"owner_type": "user",
-		"owner_id":   user["id"],
-		"scopes":     `["release:rollback"]`,
+		"name":          "Rollback",
+		"owner_user_id": user["id"],
+		"scopes":        `["release:rollback"]`,
 	})
 	postExpectStatusWithHeaders(t, router, "/api/v1/release-requests/"+apiRelease["id"].(string)+"/rollback", map[string]any{
 		"idempotency_key": "api-key-rollback-no-candidates",
 	}, http.StatusBadRequest, map[string]string{"Authorization": "Bearer " + rollbackKey["plaintext"].(string)})
 	confirmKey := postForData(t, router, "/api/v1/api-keys", map[string]any{
-		"name":       "Confirm",
-		"owner_type": "user",
-		"owner_id":   user["id"],
-		"scopes":     `["release:create","release:confirm"]`,
+		"name":          "Confirm",
+		"owner_user_id": user["id"],
+		"scopes":        `["release:create","release:confirm"]`,
 	})
 	confirmTarget := postForStatusWithHeaders(t, router, "/api/v1/release-requests", map[string]any{
 		"service_id":           service["id"],
@@ -306,10 +301,9 @@ func TestInventoryAPIFlow(t *testing.T) {
 		t.Fatalf("expected api key id in release_cancelled event, got %s", cancelEventBytes)
 	}
 	deployReadKey := postForData(t, router, "/api/v1/api-keys", map[string]any{
-		"name":       "Deploy Read",
-		"owner_type": "user",
-		"owner_id":   user["id"],
-		"scopes":     `["deploy:read"]`,
+		"name":          "Deploy Read",
+		"owner_user_id": user["id"],
+		"scopes":        `["deploy:read"]`,
 	})
 	deployRecordsByKey := getForDataWithHeaders(t, router, "/api/v1/deploy-records", map[string]string{"Authorization": "Bearer " + deployReadKey["plaintext"].(string)})
 	if deployRecordsByKey == nil {

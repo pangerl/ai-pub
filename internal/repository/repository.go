@@ -643,7 +643,7 @@ func (s Store) CreateAPIKey(ctx context.Context, item domain.APIKey) (APIKeyWith
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO api_keys (id, name, prefix, key_hash, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Prefix, hash, item.OwnerType, item.OwnerID, item.Scopes, nullableTimePtr(item.ExpiresAt), boolInt(item.Enabled), nullableTimePtr(item.LastUsedAt), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+		item.ID, item.Name, item.Prefix, hash, "user", item.OwnerUserID, item.Scopes, nullableTimePtr(item.ExpiresAt), boolInt(item.Enabled), nullableTimePtr(item.LastUsedAt), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
 	if err != nil {
 		return APIKeyWithPlaintext{}, err
 	}
@@ -652,7 +652,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 func (s Store) ListAPIKeys(ctx context.Context) ([]domain.APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, prefix, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
+SELECT id, name, prefix, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
 FROM api_keys ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
@@ -669,10 +669,10 @@ FROM api_keys ORDER BY created_at DESC, id DESC`)
 	return items, rows.Err()
 }
 
-func (s Store) ListAPIKeysByOwner(ctx context.Context, ownerType, ownerID string) ([]domain.APIKey, error) {
+func (s Store) ListAPIKeysByUser(ctx context.Context, userID string) ([]domain.APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, prefix, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
-FROM api_keys WHERE owner_type = ? AND owner_id = ? ORDER BY created_at DESC, id DESC`, ownerType, ownerID)
+SELECT id, name, prefix, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
+FROM api_keys WHERE owner_type = 'user' AND owner_id = ? ORDER BY created_at DESC, id DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +690,7 @@ FROM api_keys WHERE owner_type = ? AND owner_id = ? ORDER BY created_at DESC, id
 
 func (s Store) GetAPIKey(ctx context.Context, id string) (domain.APIKey, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, name, prefix, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
+SELECT id, name, prefix, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
 FROM api_keys WHERE id = ?`, id)
 	item, err := scanAPIKey(row)
 	return item, normalizeNotFound(err)
@@ -701,7 +701,7 @@ func (s Store) GetAPIKeyBySecret(ctx context.Context, plaintext string) (domain.
 		return domain.APIKey{}, ErrNotFound
 	}
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, name, prefix, owner_type, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
+SELECT id, name, prefix, owner_id, scopes, expires_at, enabled, last_used_at, created_at, updated_at
 FROM api_keys WHERE prefix = ? AND key_hash = ?`, plaintext[:12], hashSecret(plaintext))
 	item, err := scanAPIKey(row)
 	return item, normalizeNotFound(err)
@@ -857,7 +857,7 @@ func scanAPIKey(row rowScanner) (domain.APIKey, error) {
 	var enabled int
 	var expiresAt, lastUsedAt sql.NullString
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.Name, &item.Prefix, &item.OwnerType, &item.OwnerID, &item.Scopes, &expiresAt, &enabled, &lastUsedAt, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.Name, &item.Prefix, &item.OwnerUserID, &item.Scopes, &expiresAt, &enabled, &lastUsedAt, &createdAt, &updatedAt)
 	if expiresAt.Valid {
 		t := parseTime(expiresAt.String)
 		item.ExpiresAt = &t

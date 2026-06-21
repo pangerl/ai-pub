@@ -34,7 +34,7 @@ DeployRecord 1 -- n ServerDeployLog
 Service + Environment + Server 1 -- 1 ServerDeploymentState
 
 ReleasePolicy belongs to system / environment / service
-ApiKey belongs to User or ServiceAccount
+ApiKey belongs to User
 NotificationConfig 1 -- n NotificationDelivery
 ```
 
@@ -60,21 +60,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - 第一版只支持普通员工和管理员。
 - 不做项目级、服务级 ACL。
 
-### 4.2 ServiceAccount
-
-用途：表示 CI/CD 或系统集成调用方。
-
-关键字段：
-
-| 字段 | 说明 |
-|------|------|
-| `id` | 主键 |
-| `name` | 名称 |
-| `owner_user_id` | 归属用户，可空 |
-| `enabled` | 是否启用 |
-| `created_at` / `updated_at` | 时间 |
-
-### 4.3 ApiKey
+### 4.2 ApiKey
 
 用途：自动化调用凭据。
 
@@ -86,8 +72,7 @@ NotificationConfig 1 -- n NotificationDelivery
 | `name` | 名称 |
 | `prefix` | key 前缀，用于列表展示 |
 | `key_hash` | key hash，不保存明文 |
-| `owner_type` | `user` 或 `service_account` |
-| `owner_id` | 归属对象 ID |
+| `owner_user_id` | 归属用户 ID |
 | `scopes` | scope 列表，JSON 文本 |
 | `expires_at` | 过期时间，可空 |
 | `enabled` | 是否启用 |
@@ -100,7 +85,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - API Key 不因创建者是管理员而自动拥有全部权限。
 - API Key 不得绕过生产发布管理员确认。
 
-### 4.4 Project
+### 4.3 Project
 
 用途：服务归属分组。
 
@@ -115,7 +100,7 @@ NotificationConfig 1 -- n NotificationDelivery
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
-### 4.5 Service
+### 4.4 Service
 
 用途：可发布服务。
 
@@ -136,7 +121,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - `(project_id, slug)` 唯一。
 - 服务不保存“当前版本”，当前版本由服务器部署状态聚合。
 
-### 4.6 ServiceVersion
+### 4.5 ServiceVersion
 
 用途：服务可发布版本。
 
@@ -159,7 +144,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - `(service_id, version)` 唯一。
 - CI 并发注册同一版本时返回已有版本或执行安全 upsert。
 
-### 4.7 Environment
+### 4.6 Environment
 
 用途：发布环境。
 
@@ -178,7 +163,7 @@ NotificationConfig 1 -- n NotificationDelivery
 
 - 生产判断必须依赖 `is_production`，不能依赖 tag 文本。
 
-### 4.8 Server
+### 4.7 Server
 
 用途：SSH 发布目标。
 
@@ -204,7 +189,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - 密码、私钥不以明文字段保存。
 - API、日志、事件不得输出敏感凭据。
 
-### 4.9 ServerGroup
+### 4.8 ServerGroup
 
 用途：组织多个服务器作为可复用运行目标。
 
@@ -221,7 +206,7 @@ NotificationConfig 1 -- n NotificationDelivery
 
 - `server_group_members(server_group_id, server_id)`
 
-### 4.10 DeploymentTarget
+### 4.9 DeploymentTarget
 
 用途：连接服务、环境、执行器和运行目标。
 
@@ -248,7 +233,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - 第一版运行目标只实现服务器和服务器组。
 - `(service_id, environment_id)` 可以有多个部署目标，但创建发布单时必须选择明确目标。
 
-### 4.11 ReleasePolicy
+### 4.10 ReleasePolicy
 
 用途：控制确认门禁和冻结。
 
@@ -275,7 +260,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - 冻结打开后新发布 preflight 返回 block，待确认发布不得确认通过。
 - 同服务同环境已有 running 发布时，默认阻断新的真实执行。
 
-### 4.12 ReleaseRequest
+### 4.11 ReleaseRequest
 
 用途：发布执行意图和门禁状态。
 
@@ -290,7 +275,7 @@ NotificationConfig 1 -- n NotificationDelivery
 | `service_version_id` | 版本 |
 | `deployment_target_id` | 部署目标 |
 | `status` | 发布单状态 |
-| `source` | `web` / `api` / `ci` / `ai_agent` |
+| `source` | `web` / `api` |
 | `idempotency_key` | 幂等键，可空 |
 | `created_by_type` / `created_by_id` | 创建主体 |
 | `authorized_by_user_id` | 授权用户，可空 |
@@ -333,7 +318,7 @@ running -> failed
 - queued 前允许取消；running 后不提供系统级紧急停止入口。
 - 发布单不得绕过发布记录直接进入 `running/success/failed`。
 
-### 4.13 DeployRecord
+### 4.12 DeployRecord
 
 用途：真实执行记录。
 
@@ -371,7 +356,7 @@ running -> failed
 - 全部失败或 skipped，且没有成功服务器：`failed`。
 - 至少一台成功，且有 failed 或 skipped：`partial`。
 
-### 4.14 ServerDeployLog
+### 4.13 ServerDeployLog
 
 用途：单台服务器执行状态和日志。
 
@@ -395,7 +380,7 @@ running -> failed
 - 日志不得包含未脱敏密码、私钥、token。
 - 多服务器 fail-fast 后未执行服务器标记为 `skipped`。
 
-### 4.15 ServerDeploymentState
+### 4.14 ServerDeploymentState
 
 用途：服务器当前运行版本视图。
 
@@ -416,7 +401,7 @@ running -> failed
 - `(service_id, environment_id, server_id)` 唯一。
 - 环境级当前版本由服务器状态聚合得出；不一致时显示“混合版本”。
 
-### 4.16 ReleaseEvent
+### 4.15 ReleaseEvent
 
 用途：关键动作追溯。
 
@@ -428,7 +413,7 @@ running -> failed
 | `release_request_id` | 发布单，可空 |
 | `deploy_record_id` | 发布记录，可空 |
 | `event_type` | 事件类型 |
-| `actor_type` | `user` / `api_key` / `ai_agent` / `service_account` / `system` |
+| `actor_type` | `user` / `api_key` / `system` |
 | `actor_id` | 主体 ID |
 | `authorized_user_id` | 授权用户，可空 |
 | `api_key_id` | API Key，可空 |
@@ -451,7 +436,7 @@ running -> failed
 - `notification_sent`
 - `notification_failed`
 
-### 4.17 NotificationConfig
+### 4.16 NotificationConfig
 
 用途：通知渠道配置。
 
@@ -463,11 +448,10 @@ running -> failed
 | `channel` | `wecom_robot` |
 | `name` | 名称 |
 | `webhook_url_enc` | 加密后的 webhook |
-| `secret_enc` | 加密后的签名密钥，可空 |
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
-### 4.18 NotificationDelivery
+### 4.17 NotificationDelivery
 
 用途：通知发送记录。
 
@@ -480,8 +464,7 @@ running -> failed
 | `event_type` | 触发事件 |
 | `release_request_id` | 发布单，可空 |
 | `deploy_record_id` | 发布记录，可空 |
-| `status` | `pending` / `sent` / `failed` |
-| `attempt_count` | 尝试次数 |
+| `status` | `sent` / `failed` |
 | `last_error` | 错误摘要 |
 | `sent_at` | 发送时间 |
 | `created_at` / `updated_at` | 时间 |

@@ -51,7 +51,7 @@ func TestInventoryCRUDAndAPIKeyPlaintextOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := store.CreateAPIKey(ctx, domain.APIKey{Name: "CI", OwnerType: "user", OwnerID: user.ID, Scopes: `["release:create"]`})
+	key, err := store.CreateAPIKey(ctx, domain.APIKey{Name: "CI", OwnerUserID: user.ID, Scopes: `["release:create"]`})
 	if err != nil {
 		t.Fatal(err)
 	}

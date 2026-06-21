@@ -12,7 +12,6 @@
 - API 如何表达发布流程。
 - 前端页面如何围绕用户任务组织。
 - MySQL 8 容器化运行路径如何落地。
-- 后续 AI Agent 如何复用同一套发布流程。
 
 ## 2. 拆分原则
 
@@ -20,7 +19,6 @@
 - 第一版围绕功能闭环，不展开高并发、多实例、复杂 RBAC、多租户、运行中紧急停止等非目标。
 - 技术文档应能直接指导实现，必须包含关键约束、接口边界、验收方式和需要避免的方向。
 - 先写会影响数据结构、API 和流程的文档，再写页面和工程细节文档。
-- AI Agent 接入方案放在基础执行闭环之后，不阻塞第一版核心设计。
 
 ## 3. 文档清单
 
@@ -28,12 +26,11 @@
 |------|------|------|--------|
 | 1 | `docs/domain-model-design.md` | 明确领域模型、表结构、状态机和事件模型 | P0 |
 | 2 | `docs/backend-architecture-design.md` | 明确 Go 后端分层、事务边界、队列调度和执行器 contract | P0 |
-| 3 | `docs/api-design.md` | 明确 Web/API/外部调用接口和 OpenAPI 约束 | P0 |
+| 3 | `docs/api-design.md` | 明确 Web/API/外部调用接口 | P0 |
 | 4 | `docs/frontend-ia-design.md` | 明确前端导航、页面、详情页、状态展示和主要交互 | P0 |
 | 5 | `docs/engineering-scaffold-design.md` | 明确目录结构、配置、migration、测试和本地开发方式 | P0 |
 | 6 | `docs/notification-design.md` | 明确企业微信机器人 webhook 和通知扩展点 | P1 |
 | 7 | `docs/development-plan.md` | 在技术设计稳定后拆分可执行开发任务和验收命令 | P1 |
-| 8 | `docs/agent-integration-design.md` | 在基础发布闭环跑通后设计 AI Agent API、skill 和调用流程 | P2 |
 
 ## 4. 文档一：领域模型设计
 
@@ -64,7 +61,7 @@
   - `ReleasePolicy`
   - `ReleaseEvent`
   - `User`
-  - `ApiKey` / `ServiceAccount`
+  - `ApiKey`
   - `NotificationConfig`
   - `NotificationDelivery`
 - 实体关系图。
@@ -77,7 +74,7 @@
 - 冻结开关、确认门禁和同服务同环境运行中发布阻断规则。
 - 回滚发布单与原发布单的关联方式。
 - 审计事件字段和查询维度。
-- 用户、角色、API Key、Service Account 和调用身份的最小模型边界。
+- 用户、角色、API Key 和调用身份的最小模型边界。
 - 企业微信机器人 webhook 配置和通知发送记录的最小持久化模型。
 - MySQL 8 字段类型和后续 PostgreSQL 适配边界。
 
@@ -150,7 +147,7 @@
 目标：
 
 - 明确第一版 REST API 的资源、请求、响应、错误码和鉴权要求。
-- 为 Web 前端、CI/CD、后续 AI Agent 和 OpenAPI 文档提供统一接口基础。
+- 为 Web 前端和 CI/CD 提供统一接口基础。
 
 必须覆盖：
 
@@ -184,18 +181,16 @@
   - 健康检查
   - 运行摘要
   - migration 状态
-- OpenAPI 生成和维护方式。
 
 明确不做：
 
-- 不在 API 设计文档中展开 Agent 专用复杂 API；这里只定义 Agent API 的扩展边界、调用身份和复用业务 API 的原则，详细薄封装放到 `docs/agent-integration-design.md`。
 - 不设计运行中紧急停止接口。
 - 不设计复杂批量编排接口。
 
 完成标准：
 
 - 前端可以只依赖该文档完成 API client。
-- 后端可以据此编写 handler 和 OpenAPI。
+- 后端可以据此编写 handler。
 - 每个关键写接口都有幂等、鉴权和事件写入要求。
 
 ## 7. 文档四：前端信息架构设计
@@ -362,40 +357,7 @@
 - 每个任务都能独立验收。
 - 不把 P2 能力混入第一版必交付范围。
 
-## 11. 文档八：AI Agent 接入方案
-
-文件：
-
-- `docs/agent-integration-design.md`
-
-目标：
-
-- 在基础发布闭环跑通后，设计 AI Agent 如何安全复用同一套发布流程。
-
-必须覆盖：
-
-- Agent 调用身份。
-- Agent 可用 API 范围。
-- Agent 创建发布单前的 preflight 要求。
-- Agent 幂等键。
-- Agent summary 接口。
-- 生产发布必须等待管理员确认。
-- Agent 回滚发布单流程。
-- Agent 审计字段。
-- skill 或工具封装建议。
-
-明确不做：
-
-- Agent 不绕过发布执行流程。
-- Agent 不独立确认生产发布。
-- Agent 不直接操作执行器。
-
-完成标准：
-
-- AI Agent 能作为受限调用方发起非生产发布、查询发布状态和总结结果。
-- 生产发布仍由管理员确认。
-
-## 12. 建议编写顺序
+## 11. 建议编写顺序
 
 1. `docs/domain-model-design.md`
 2. `docs/backend-architecture-design.md`
@@ -404,7 +366,6 @@
 5. `docs/engineering-scaffold-design.md`
 6. `docs/notification-design.md`
 7. `docs/development-plan.md`
-8. `docs/agent-integration-design.md`
 
 说明：
 
@@ -412,4 +373,3 @@
 - 前端信息架构应在 API 初稿后编写，便于对齐页面所需数据。
 - 工程脚手架设计应在后端架构和数据库策略明确后编写。
 - 开发计划必须放在技术设计之后，避免任务拆分依赖未决设计。
-- AI Agent 接入方案后置，不阻塞第一版人工发布闭环。

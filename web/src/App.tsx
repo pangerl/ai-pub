@@ -1849,9 +1849,6 @@ function NotificationForm({ onDone }: { onDone: () => void }) {
       <Form.Item name="webhook_url" label="Webhook URL" rules={[{ required: true }]}>
         <Input />
       </Form.Item>
-      <Form.Item name="secret" label="Secret">
-        <Input.Password />
-      </Form.Item>
       <Button type="primary" htmlType="submit" loading={loading}>
         保存通知
       </Button>
@@ -1959,7 +1956,6 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
     try {
       const body = await apiPost<APIKeyCreateResponse>('/api/v1/api-keys', {
         ...values,
-        owner_type: 'user',
         scopes: values.scopes || '["release:create"]',
       });
       setPlaintext(body.plaintext);
@@ -1982,13 +1978,13 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ owner_type: 'user', scopes: '["release:create","release:confirm"]' }}
+        initialValues={{ scopes: '["release:create","release:confirm"]' }}
         onFinish={(values) => void submit(values)}
       >
         <Form.Item name="name" label="名称" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        {ownKey ? <Typography.Text type="secondary">该访问密钥将归属当前登录用户。</Typography.Text> : <Form.Item name="owner_id" label="归属用户" rules={[{ required: true }]}><Select options={users.map(entityOption)} /></Form.Item>}
+        {ownKey ? <Typography.Text type="secondary">该访问密钥将归属当前登录用户。</Typography.Text> : <Form.Item name="owner_user_id" label="归属用户" rules={[{ required: true }]}><Select options={users.map(entityOption)} /></Form.Item>}
         <Form.Item name="scopes" label="Scopes JSON" rules={[{ required: true }]}>
           <Input.TextArea rows={3} />
         </Form.Item>
@@ -2034,7 +2030,7 @@ function APIKeyList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
                   <Typography.Text strong>{item.name ?? item.id}</Typography.Text>
                   <StatusTag value={enabled ? 'enabled' : 'disabled'} />
                 </Space>
-                <Typography.Text type="secondary">{`${item.prefix ?? '-'} / ${item.owner_type ?? '-'} / ${item.owner_id ?? '-'}`}</Typography.Text>
+                <Typography.Text type="secondary">{`${item.prefix ?? '-'} / ${item.owner_user_id ?? '-'}`}</Typography.Text>
                 <Typography.Text type="secondary">{`${item.scopes ?? '[]'}`}</Typography.Text>
               </div>
               <Space>

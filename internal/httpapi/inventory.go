@@ -539,7 +539,7 @@ func apiKeyManager(w http.ResponseWriter, r *http.Request, jwtSecret string) (do
 }
 
 func canManageAPIKey(user domain.User, key domain.APIKey) bool {
-	return user.Role == "admin" || (key.OwnerType == "user" && key.OwnerID == user.ID)
+	return user.Role == "admin" || key.OwnerUserID == user.ID
 }
 
 func listAPIKeys(store repository.Store, jwtSecret string) http.HandlerFunc {
@@ -555,7 +555,7 @@ func listAPIKeys(store repository.Store, jwtSecret string) http.HandlerFunc {
 		if user.Role == "admin" {
 			items, err = store.ListAPIKeys(r.Context())
 		} else {
-			items, err = store.ListAPIKeysByOwner(r.Context(), "user", user.ID)
+			items, err = store.ListAPIKeysByUser(r.Context(), user.ID)
 		}
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
@@ -576,8 +576,7 @@ func createAPIKey(store repository.Store, jwtSecret string) http.HandlerFunc {
 			return
 		}
 		if user.Role != "admin" {
-			input.OwnerType = "user"
-			input.OwnerID = user.ID
+			input.OwnerUserID = user.ID
 		}
 		if err := validateAPIKeyScopes(input.Scopes, user.Role == "admin"); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)

@@ -105,17 +105,16 @@ type User struct {
 }
 
 type APIKey struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	OwnerType  string     `json:"owner_type"`
-	OwnerID    string     `json:"owner_id"`
-	Scopes     string     `json:"scopes"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Enabled    bool       `json:"enabled"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Prefix      string     `json:"prefix"`
+	OwnerUserID string     `json:"owner_user_id"`
+	Scopes      string     `json:"scopes"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Enabled     bool       `json:"enabled"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type Credential struct {
@@ -233,7 +232,6 @@ type NotificationDelivery struct {
 	ReleaseRequestID string    `json:"release_request_id,omitempty"`
 	DeployRecordID   string    `json:"deploy_record_id,omitempty"`
 	Status           string    `json:"status"`
-	AttemptCount     int       `json:"attempt_count"`
 	LastError        string    `json:"last_error"`
 	SentAt           time.Time `json:"sent_at,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`

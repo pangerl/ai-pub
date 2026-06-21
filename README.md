@@ -7,7 +7,7 @@
 已完成 M0 工程骨架、M1 基础配置 API、M2 发布单门禁、M3 Mock/Dry-run 发布闭环、M4 SSH 基础能力、M5 前端工作台和 M6 通知能力。运行时统一使用 MySQL 8；开发、验收和生产不再支持 SQLite。
 
 - Go 后端入口和 `/healthz`。
-- MySQL 配置加载和 migration runner。
+- MySQL 配置加载和 migration runner；`MIGRATION_AUTO=false` 可跳过启动自动迁移，`MIGRATION_CHECK_ONLY=true` 只检查待执行 migration 后退出。
 - React/Vite 前端工作台。
 - 用户名密码登录与 HttpOnly JWT 会话；未登录访问业务 API 会被拒绝。
 - 本地 Compose 首次启动会创建管理员；默认账号为 `admin`，默认密码为 `ai-pub-dev-admin`。请通过 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 覆盖，生产环境必须提供自己的值。
@@ -25,7 +25,7 @@
 - 发布单确认和取消重复提交会返回当前状态，不重复创建执行记录或事件。
 - Preflight 对缺少制品地址的版本给出 warning，并阻断覆盖 `AI_PUB_*` 系统变量的部署目标。
 - 已入队发布取消时同步取消发布记录，避免取消后仍显示为 queued。
-- 系统/环境/服务发布策略读取、保存、生效策略查询和冻结开关。
+- 系统/环境/服务发布策略读取、保存、生效策略查询和冻结开关；第一版不提供 SSH 实时检查策略。
 - 非生产本人确认、生产管理员确认、冻结阻断、运行中发布阻断。
 - 冻结策略会阻断新发布，并暂停已 queued 发布被 Worker 领取。
 - 发布单关键动作审计事件，包括已有发布单预检、确认、驳回、取消、执行、回滚和通知投递结果。
@@ -132,7 +132,7 @@ make compose-down
 
 ## 数据库与 PostgreSQL 边界
 
-当前运行时只支持 MySQL 8，所有 migration 由启动中的后端自动执行。业务层通过 repository 访问数据库，不使用 ORM；SQL 必须集中在 repository，禁止将 MySQL 专属语法扩散到 app、worker 或 HTTP 层。
+当前运行时只支持 MySQL 8。默认由启动中的后端自动执行 migration；对已由发布流程完成迁移的环境可设置 `MIGRATION_AUTO=false` 跳过执行，或设置 `MIGRATION_CHECK_ONLY=true` 只检查待执行项后退出。业务层通过 repository 访问数据库，不使用 ORM；SQL 必须集中在 repository，禁止将 MySQL 专属语法扩散到 app、worker 或 HTTP 层。
 
 项目开源后如需 PostgreSQL，应新增 `migrations/postgres`、PostgreSQL 连接与 repository 适配，并以同一套容器验收用例验证；不在当前版本维护或宣称 PostgreSQL 支持。
 

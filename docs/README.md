@@ -6,13 +6,13 @@
 
 1. `domain-model-design.md`：领域模型、表结构、状态机和事件模型。
 2. `backend-architecture-design.md`：Go 后端分层、事务边界、Worker 和执行器 contract。
-3. `api-design.md`：REST API、鉴权、幂等、OpenAPI 和 Agent API 边界。
+3. `api-design.md`：REST API、鉴权和幂等。
 4. `frontend-ia-design.md`：React 最小管理界面的页面、状态和交互。
-5. `engineering-scaffold-design.md`：目录结构、配置、migration、测试和本地 demo。
-6. `notification-design.md`：企业微信机器人 webhook 通知和渠道扩展点。
-7. `development-plan.md`：开发阶段、交付物和验证命令。
-8. `development-completion-audit.md`：当前开发完成审查、已验证范围和暂缓项。
-9. `agent-integration-design.md`：AI Agent 后置接入方案。
+5. `DESIGN.md`：前端视觉语言、颜色、排版、组件和页面布局规范。
+6. `engineering-scaffold-design.md`：目录结构、配置、migration、测试和本地 demo。
+7. `notification-design.md`：企业微信机器人 webhook 通知和渠道扩展点。
+8. `development-plan.md`：开发阶段、交付物和验证命令。
+9. `development-completion-audit.md`：当前开发完成审查、已验证范围和暂缓项。
 
 第一版实现时应始终遵守：
 

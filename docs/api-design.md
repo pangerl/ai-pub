@@ -2,13 +2,12 @@
 
 ## 1. 目标
 
-第一版 API 使用 REST 风格和 `/api/v1` 前缀，为 Web 前端、CI/CD、后续 AI Agent 和 OpenAPI 提供统一接口基础。
+第一版 API 使用 REST 风格和 `/api/v1` 前缀，为 Web 前端和 CI/CD 提供统一接口基础。
 
 ## 2. 非目标
 
 - 不设计运行中紧急停止接口。
 - 不设计复杂批量编排接口。
-- 不展开 Agent 专用复杂 API；Agent 薄封装放到 `agent-integration-design.md`。
 - 不兼容旧系统接口。
 
 ## 3. 通用约定
@@ -79,8 +78,7 @@ Idempotency-Key: xxx
 调用身份：
 
 - `user`
-- `service_account`
-- `ai_agent`
+- `api_key`
 - `system`
 
 认证方式：
@@ -336,32 +334,8 @@ POST /release-requests/{id}/preflight
 
 运维接口不得泄漏密钥和敏感配置。
 
-## 13. Agent API 边界
-
-第一版 API 只为 Agent 预留：
-
-- 调用身份 `ai_agent`。
-- 审计字段。
-- 幂等键。
-- OpenAPI 友好的业务 API。
-
-详细 Agent 薄封装放到 `agent-integration-design.md`。
-
-## 14. OpenAPI 要求
-
-OpenAPI 必须覆盖：
-
-- 认证方式。
-- 请求和响应 schema。
-- 分页字段。
-- 错误码。
-- 幂等键 header。
-- 关键状态枚举。
-- scope 要求。
-
-## 15. 验证要求
+## 13. 验证要求
 
 - Web 前端可只依赖 API 文档完成发布闭环。
 - 每个关键写接口都有鉴权、幂等和事件写入说明。
-- OpenAPI 可生成基础 API client。
 - API 不包含运行中紧急停止入口。

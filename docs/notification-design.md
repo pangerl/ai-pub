@@ -31,7 +31,6 @@
 | `channel` | 固定为 `wecom_robot` |
 | `name` | 配置名称 |
 | `webhook_url_enc` | 加密 webhook |
-| `secret_enc` | 加密签名密钥，可空 |
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
@@ -46,8 +45,7 @@
 | `event_type` | 事件类型 |
 | `release_request_id` | 发布单，可空；测试发送不关联发布单 |
 | `deploy_record_id` | 发布记录，可空 |
-| `status` | `pending` / `sent` / `failed` |
-| `attempt_count` | 尝试次数 |
+| `status` | `sent` / `failed` |
 | `last_error` | 错误摘要 |
 | `sent_at` | 发送时间 |
 | `created_at` / `updated_at` | 时间 |
@@ -71,11 +69,10 @@
 
 ```text
 业务事件发生
-  -> 创建 NotificationDelivery(pending)
   -> NotificationService 读取配置
   -> 生成企业微信消息
   -> 调用机器人 webhook
-  -> 更新 sent/failed
+  -> 创建 NotificationDelivery(sent/failed)
   -> 写 ReleaseEvent(notification_sent/notification_failed)
 ```
 
@@ -90,14 +87,8 @@
 配置项：
 
 - webhook URL。
-- 签名 secret，可空。
 - enabled。
 - 名称。
-
-签名：
-
-- 如果配置 secret，则按企业微信机器人签名规则生成签名参数。
-- secret 加密保存，不回显。
 
 测试发送：
 
@@ -150,15 +141,6 @@
 新发布单：{release_request_id}
 ```
 
-## 8. 重试策略
-
-第一版采用简单重试：
-
-- 最多重试 3 次。
-- 记录每次失败摘要。
-- 不阻塞主流程。
-
-不做复杂指数退避或死信队列；如后续需要，可在 `NotificationDelivery` 基础上扩展。
 
 ## 9. 扩展点
 

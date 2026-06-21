@@ -54,7 +54,7 @@
 - `database/sql`。
 - 显式 SQL 和 repository。
 - 显式 migration。
-- REST API + OpenAPI。
+- REST API。
 
 ## 5. 前端技术选型
 

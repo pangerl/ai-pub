@@ -24,13 +24,11 @@ type CreateNotificationConfigInput struct {
 	Name       string `json:"name"`
 	Channel    string `json:"channel"`
 	WebhookURL string `json:"webhook_url"`
-	Secret     string `json:"secret"`
 }
 
 type PatchNotificationConfigInput struct {
 	Name       string `json:"name"`
 	WebhookURL string `json:"webhook_url"`
-	Secret     string `json:"secret"`
 	Enabled    *bool  `json:"enabled"`
 }
 
@@ -59,17 +57,10 @@ func (s NotificationService) CreateConfig(ctx context.Context, input CreateNotif
 	if err != nil {
 		return domain.NotificationConfig{}, err
 	}
-	secretEnc := ""
-	if input.Secret != "" {
-		secretEnc, err = s.box.Encrypt(input.Secret)
-		if err != nil {
-			return domain.NotificationConfig{}, err
-		}
-	}
 	return s.store.CreateNotificationConfig(ctx, domain.NotificationConfig{
 		Name:    input.Name,
 		Channel: input.Channel,
-	}, webhookEnc, secretEnc)
+	}, webhookEnc)
 }
 
 func (s NotificationService) ListConfigs(ctx context.Context) ([]domain.NotificationConfig, error) {
@@ -92,13 +83,6 @@ func (s NotificationService) PatchConfig(ctx context.Context, id string, input P
 		}
 		patch.WebhookURL = webhookEnc
 	}
-	if input.Secret != "" {
-		secretEnc, err := s.box.Encrypt(input.Secret)
-		if err != nil {
-			return domain.NotificationConfig{}, err
-		}
-		patch.Secret = secretEnc
-	}
 	return s.store.UpdateNotificationConfig(ctx, id, patch)
 }
 
@@ -114,12 +98,12 @@ func (s NotificationService) Test(ctx context.Context, configID string) (domain.
 }
 
 func (s NotificationService) NotifyAll(ctx context.Context, event NotificationEvent) {
-	configs, err := s.store.ListEnabledNotificationSecrets(ctx)
+	configs, err := s.store.ListEnabledNotificationWebhooks(ctx)
 	if err != nil {
 		return
 	}
 	for _, config := range configs {
-		decrypted, err := s.decryptSecret(config)
+		decrypted, err := s.decryptWebhook(config)
 		if err != nil {
 			delivery, _ := s.store.CreateNotificationDelivery(ctx, domain.NotificationDelivery{
 				ConfigID:         config.Config.ID,
@@ -127,7 +111,6 @@ func (s NotificationService) NotifyAll(ctx context.Context, event NotificationEv
 				ReleaseRequestID: event.ReleaseRequestID,
 				DeployRecordID:   event.DeployRecordID,
 				Status:           "failed",
-				AttemptCount:     1,
 				LastError:        err.Error(),
 			})
 			s.recordDeliveryEvent(ctx, delivery)
@@ -137,42 +120,33 @@ func (s NotificationService) NotifyAll(ctx context.Context, event NotificationEv
 	}
 }
 
-func (s NotificationService) decryptConfig(ctx context.Context, id string) (repository.NotificationSecret, error) {
-	config, err := s.store.GetNotificationSecret(ctx, id)
+func (s NotificationService) decryptConfig(ctx context.Context, id string) (repository.NotificationWebhook, error) {
+	config, err := s.store.GetNotificationWebhook(ctx, id)
 	if err != nil {
-		return repository.NotificationSecret{}, err
+		return repository.NotificationWebhook{}, err
 	}
-	return s.decryptSecret(config)
+	return s.decryptWebhook(config)
 }
 
-func (s NotificationService) decryptSecret(config repository.NotificationSecret) (repository.NotificationSecret, error) {
+func (s NotificationService) decryptWebhook(config repository.NotificationWebhook) (repository.NotificationWebhook, error) {
 	webhook, err := s.box.Decrypt(config.WebhookURL)
 	if err != nil {
-		return repository.NotificationSecret{}, err
-	}
-	secret := ""
-	if config.Secret != "" {
-		secret, err = s.box.Decrypt(config.Secret)
-		if err != nil {
-			return repository.NotificationSecret{}, err
-		}
+		return repository.NotificationWebhook{}, err
 	}
 	config.WebhookURL = webhook
-	config.Secret = secret
 	return config, nil
 }
 
-func (s NotificationService) sendOne(ctx context.Context, config repository.NotificationSecret, event NotificationEvent) (domain.NotificationDelivery, error) {
-	err := s.sender.Send(ctx, config.WebhookURL, config.Secret, event.Content)
+func (s NotificationService) sendOne(ctx context.Context, config repository.NotificationWebhook, event NotificationEvent) (domain.NotificationDelivery, error) {
+	err := s.sender.Send(ctx, config.WebhookURL, event.Content)
 	if err != nil {
-		err = errors.New(sanitizeNotificationError(err.Error(), config.WebhookURL, config.Secret))
+		err = errors.New(sanitizeNotificationError(err.Error(), config.WebhookURL))
 	}
 	delivery := domain.NotificationDelivery{
 		ConfigID:         config.Config.ID,
 		EventType:        event.EventType,
 		ReleaseRequestID: event.ReleaseRequestID,
 		DeployRecordID:   event.DeployRecordID,
-		AttemptCount:     1,
 	}
 	if err != nil {
 		delivery.Status = "failed"
@@ -194,8 +168,8 @@ func (s NotificationService) sendOne(ctx context.Context, config repository.Noti
 	return saved, nil
 }
 
-func sanitizeNotificationError(message string, webhookURL string, secret string) string {
-	for _, value := range []string{webhookURL, secret} {
+func sanitizeNotificationError(message string, webhookURL string) string {
+	for _, value := range []string{webhookURL} {
 		if value != "" {
 			message = strings.ReplaceAll(message, value, "[redacted]")
 		}

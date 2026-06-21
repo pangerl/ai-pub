@@ -23,7 +23,7 @@
 
 ```text
 cmd/server
-internal/httpapi        # REST API、middleware、auth、OpenAPI 适配
+internal/httpapi        # REST API、middleware、auth
 internal/app            # 用例服务：发布单、preflight、确认、执行、回滚
 internal/domain         # 领域对象、状态机、聚合规则
 internal/repository     # SQL、事务与未来数据库方言边界

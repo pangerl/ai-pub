@@ -223,8 +223,8 @@ if [[ "${employee_login_code}" != "200" ]]; then
   exit 1
 fi
 employee_key_file="${TMP_DIR}/employee-key.json"
-employee_key_code="$(curl -sS -b "${employee_cookie}" -o "${employee_key_file}" -w '%{http_code}' -X POST "${API_URL}/api-keys" -H 'Content-Type: application/json' -d "{\"name\":\"employee-ci-${suffix}\",\"owner_type\":\"user\",\"owner_id\":\"forged-owner\",\"scopes\":\"[\\\"release:create\\\"]\"}")"
-if [[ "${employee_key_code}" != "201" || "$(json_get "${employee_key_file}" data.key.owner_id)" != "${user_id}" ]]; then
+employee_key_code="$(curl -sS -b "${employee_cookie}" -o "${employee_key_file}" -w '%{http_code}' -X POST "${API_URL}/api-keys" -H 'Content-Type: application/json' -d "{\"name\":\"employee-ci-${suffix}\",\"owner_user_id\":\"forged-owner\",\"scopes\":\"[\\\"release:create\\\"]\"}")"
+if [[ "${employee_key_code}" != "201" || "$(json_get "${employee_key_file}" data.key.owner_user_id)" != "${user_id}" ]]; then
   printf 'employee API key creation failed -> HTTP %s\n' "${employee_key_code}" >&2
   cat "${employee_key_file}" >&2
   exit 1

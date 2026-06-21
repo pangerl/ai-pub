@@ -71,7 +71,7 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 		t.Fatalf("employee admin write got %d: %s", projectRecorder.Code, projectRecorder.Body.String())
 	}
 
-	keyRequest := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"employee-ci","owner_type":"user","owner_id":"forged-owner","scopes":"[\"release:create\"]"}`))
+	keyRequest := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"employee-ci","owner_user_id":"forged-owner","scopes":"[\"release:create\"]"}`))
 	keyRequest.Header.Set("Content-Type", "application/json")
 	keyRequest.AddCookie(cookie)
 	keyRecorder := httptest.NewRecorder()
@@ -88,7 +88,7 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	if err := json.Unmarshal(keyRecorder.Body.Bytes(), &keyResponse); err != nil {
 		t.Fatal(err)
 	}
-	if keyResponse.Data.Key.OwnerID != employee.ID || keyResponse.Data.Key.OwnerType != "user" {
+	if keyResponse.Data.Key.OwnerUserID != employee.ID {
 		t.Fatalf("employee must not choose API key owner: %#v", keyResponse.Data.Key)
 	}
 	for _, scopes := range []string{`["admin:write"]`, `["*"]`, `["unknown:scope"]`} {
@@ -167,7 +167,7 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	}
 	foundInitial := false
 	for _, key := range listKeysResponse.Data {
-		if key.OwnerID != employee.ID || key.OwnerType != "user" {
+		if key.OwnerUserID != employee.ID {
 			t.Fatalf("employee should only see own keys, got %#v", listKeysResponse.Data)
 		}
 		foundInitial = foundInitial || key.ID == keyResponse.Data.Key.ID
@@ -176,7 +176,7 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 		t.Fatalf("employee should only see own key, got %#v", listKeysResponse.Data)
 	}
 
-	otherKey, err := store.CreateAPIKey(context.Background(), domain.APIKey{Name: "other-ci", OwnerType: "user", OwnerID: "other-user", Scopes: `["release:create"]`})
+	otherKey, err := store.CreateAPIKey(context.Background(), domain.APIKey{Name: "other-ci", OwnerUserID: "other-user", Scopes: `["release:create"]`})
 	if err != nil {
 		t.Fatal(err)
 	}
