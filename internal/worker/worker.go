@@ -180,12 +180,22 @@ func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, 
 			Server:  server,
 		})
 	case "ssh":
+		var gateway *domain.Server
+		if server.GatewayID != "" {
+			item, err := s.store.GetServer(ctx, server.GatewayID)
+			if err != nil {
+				code := 1
+				return repository.ServerResult{Status: "failed", ExitCode: &code, ErrorCode: "connect_failed", ErrorMessage: "gateway server is not available"}
+			}
+			gateway = &item
+		}
 		return s.ssh.Execute(ctx, executor.Request{
 			Release: claimed.Release,
 			Record:  claimed.Record,
 			Target:  claimed.Target,
 			Version: claimed.Version,
 			Server:  server,
+			Gateway: gateway,
 		})
 	default:
 		code := 1

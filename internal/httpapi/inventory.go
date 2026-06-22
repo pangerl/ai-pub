@@ -291,6 +291,7 @@ func patchServer(store repository.Store) http.HandlerFunc {
 			Username      *string `json:"username"`
 			AuthType      *string `json:"auth_type"`
 			CredentialRef *string `json:"credential_ref"`
+			Role          *string `json:"role"`
 			GatewayID     *string `json:"gateway_id"`
 			Enabled       *bool   `json:"enabled"`
 		}
@@ -314,6 +315,9 @@ func patchServer(store repository.Store) http.HandlerFunc {
 		}
 		if patch.CredentialRef != nil {
 			existing.CredentialRef = *patch.CredentialRef
+		}
+		if patch.Role != nil {
+			existing.Role = *patch.Role
 		}
 		if patch.GatewayID != nil {
 			existing.GatewayID = *patch.GatewayID

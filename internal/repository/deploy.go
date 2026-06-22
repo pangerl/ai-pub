@@ -243,7 +243,7 @@ func (s Store) resolveDeploySnapshot(ctx context.Context, record domain.DeployRe
 
 func (s Store) ListDeployServers(ctx context.Context, deployRecordID string) ([]domain.Server, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT s.id, s.name, s.host, s.port, s.username, s.auth_type, s.credential_ref, s.gateway_id, s.enabled, s.last_check_status, s.last_check_at, s.created_at, s.updated_at
+SELECT s.id, s.name, s.host, s.port, s.username, s.auth_type, s.credential_ref, s.role, s.gateway_id, s.enabled, s.last_check_status, s.last_check_at, s.created_at, s.updated_at
 FROM server_deploy_logs l
 JOIN servers s ON s.id = l.server_id
 WHERE l.deploy_record_id = ?

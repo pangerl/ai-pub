@@ -58,6 +58,7 @@ CREATE TABLE servers (
   username VARCHAR(255) NOT NULL,
   auth_type VARCHAR(32) NOT NULL,
   credential_ref VARCHAR(64) NOT NULL,
+  role VARCHAR(32) NOT NULL DEFAULT 'application',
   gateway_id VARCHAR(64) NOT NULL,
   enabled TINYINT(1) NOT NULL DEFAULT 1,
   last_check_status VARCHAR(64) NOT NULL,

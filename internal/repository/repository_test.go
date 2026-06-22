@@ -70,6 +70,47 @@ func TestInventoryCRUDAndAPIKeyPlaintextOnce(t *testing.T) {
 	}
 }
 
+func TestApplicationServerCanUseOnlyAnEnabledGateway(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	gateway, err := store.CreateServer(ctx, domain.Server{
+		Name: "bastion", Host: "gateway.example", Username: "jump", AuthType: "none", Role: "gateway",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := store.CreateServer(ctx, domain.Server{
+		Name: "app", Host: "app.internal", Username: "deploy", AuthType: "none", GatewayID: gateway.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if application.Role != "application" || application.GatewayID != gateway.ID {
+		t.Fatalf("expected application server to retain gateway, got %#v", application)
+	}
+	plain, err := store.CreateServer(ctx, domain.Server{
+		Name: "plain", Host: "plain.internal", Username: "deploy", AuthType: "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateServer(ctx, domain.Server{
+		Name: "invalid", Host: "invalid.internal", Username: "deploy", AuthType: "none", GatewayID: plain.ID,
+	}); err == nil {
+		t.Fatal("expected non-gateway reference to be rejected")
+	}
+	gateway.Enabled = false
+	if _, err := store.UpdateServer(ctx, gateway.ID, gateway); err == nil {
+		t.Fatal("expected used gateway to remain enabled")
+	}
+	gateway.Enabled = true
+	gateway.Role = "application"
+	if _, err := store.UpdateServer(ctx, gateway.ID, gateway); err == nil {
+		t.Fatal("expected used gateway to retain gateway role")
+	}
+}
+
 func newTestStore(t *testing.T) Store {
 	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")

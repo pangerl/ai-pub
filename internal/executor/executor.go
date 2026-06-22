@@ -23,6 +23,7 @@ type Request struct {
 	Target  domain.DeploymentTarget
 	Version domain.ServiceVersion
 	Server  domain.Server
+	Gateway *domain.Server
 }
 
 type Executor interface {
@@ -87,7 +88,7 @@ type SSH struct {
 	Command     func(context.Context, string, ...string) *exec.Cmd
 }
 
-func (s SSH) Check(ctx context.Context, server domain.Server) repository.ServerResult {
+func (s SSH) Check(ctx context.Context, server domain.Server, gateway *domain.Server) repository.ServerResult {
 	start := time.Now()
 	if server.CredentialRef == "" || server.AuthType == "none" {
 		return failedResult(start, "auth_failed", "ssh credential is required", nil)
@@ -98,11 +99,17 @@ func (s SSH) Check(ctx context.Context, server domain.Server) repository.ServerR
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	args, commandEnv, cleanup, err := sshAuth(server.AuthType, secret)
+	args, commandEnv, cleanup, err := sshAuth(server.AuthType, secret, "AI_PUB_SSH_ASKPASS_PASSWORD")
 	if err != nil {
 		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
 	}
 	defer cleanup()
+	proxyArgs, proxyEnv, proxyCleanup, proxySecret, err := s.gatewayProxy(ctx, gateway)
+	if err != nil {
+		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
+	}
+	defer proxyCleanup()
+	args = append(args, proxyArgs...)
 	args = append(args,
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=15",
@@ -115,14 +122,15 @@ func (s SSH) Check(ctx context.Context, server domain.Server) repository.ServerR
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Env = append(os.Environ(), commandEnv...)
+	cmd.Env = append(cmd.Env, proxyEnv...)
 	err = cmd.Run()
-	output := sanitize(stdout.String()+"\n"+stderr.String(), secret.Secret)
+	output := sanitizeAll(stdout.String()+"\n"+stderr.String(), secret.Secret, proxySecret)
 	if err != nil {
 		code := 1
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return failedResult(start, "connect_timeout", "ssh connection timed out", &code)
 		}
-		return repository.ServerResult{Status: "failed", ExitCode: &code, DurationMS: int(time.Since(start).Milliseconds()), LogOutput: output, ErrorCode: "connect_failed", ErrorMessage: sanitize(err.Error(), secret.Secret)}
+		return repository.ServerResult{Status: "failed", ExitCode: &code, DurationMS: int(time.Since(start).Milliseconds()), LogOutput: output, ErrorCode: "connect_failed", ErrorMessage: sanitizeAll(err.Error(), secret.Secret, proxySecret)}
 	}
 	code := 0
 	return repository.ServerResult{Status: "success", ExitCode: &code, DurationMS: int(time.Since(start).Milliseconds()), LogOutput: output}
@@ -141,11 +149,16 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
-	args, commandEnv, cleanup, err := sshAuth(req.Server.AuthType, secret)
+	args, commandEnv, cleanup, err := sshAuth(req.Server.AuthType, secret, "AI_PUB_SSH_ASKPASS_PASSWORD")
 	if err != nil {
 		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
 	}
 	defer cleanup()
+	proxyArgs, proxyEnv, proxyCleanup, proxySecret, err := s.gatewayProxy(ctx, req.Gateway)
+	if err != nil {
+		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
+	}
+	defer proxyCleanup()
 	command := req.Target.ScriptPath
 	command = remoteEnvPrefix(req) + command
 	if req.Target.WorkingDir != "" {
@@ -158,6 +171,7 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 		"-o", fmt.Sprintf("ConnectTimeout=%d", int(timeout.Seconds())),
 		"-p", fmt.Sprintf("%d", req.Server.Port),
 	)
+	args = append(args, proxyArgs...)
 	args = append(args, req.Server.Username+"@"+req.Server.Host, command)
 	cmd := s.command(ctx, args...)
 	var stdout bytes.Buffer
@@ -165,11 +179,12 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Env = append(os.Environ(), commandEnv...)
+	cmd.Env = append(cmd.Env, proxyEnv...)
 	for key, value := range executionEnv(req) {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	runErr := cmd.Run()
-	output := sanitize(stdout.String()+"\n"+stderr.String(), secret.Secret)
+	output := sanitizeAll(stdout.String()+"\n"+stderr.String(), secret.Secret, proxySecret)
 	if runErr != nil {
 		exitCode := 1
 		var exitErr *exec.ExitError
@@ -191,7 +206,7 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 				DurationMS:   int(time.Since(start).Milliseconds()),
 				LogOutput:    output,
 				ErrorCode:    errorCode,
-				ErrorMessage: sanitize(runErr.Error(), secret.Secret),
+				ErrorMessage: sanitizeAll(runErr.Error(), secret.Secret, proxySecret),
 			}
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -203,7 +218,7 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 			DurationMS:   int(time.Since(start).Milliseconds()),
 			LogOutput:    output,
 			ErrorCode:    "internal_error",
-			ErrorMessage: sanitize(runErr.Error(), secret.Secret),
+			ErrorMessage: sanitizeAll(runErr.Error(), secret.Secret, proxySecret),
 		}
 	}
 	exitCode := 0
@@ -222,7 +237,7 @@ func (s SSH) command(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "ssh", args...)
 }
 
-func sshAuth(authType string, secret repository.CredentialSecret) ([]string, []string, func(), error) {
+func sshAuth(authType string, secret repository.CredentialSecret, passwordEnv string) ([]string, []string, func(), error) {
 	switch authType {
 	case "private_key":
 		keyPath, cleanup, err := privateKeyFile(authType, secret)
@@ -234,7 +249,7 @@ func sshAuth(authType string, secret repository.CredentialSecret) ([]string, []s
 		if secret.Credential.Type != "password" {
 			return nil, nil, func() {}, fmt.Errorf("credential type mismatch")
 		}
-		askpassPath, cleanup, err := askpassHelper()
+		askpassPath, cleanup, err := askpassHelper(passwordEnv)
 		if err != nil {
 			return nil, nil, func() {}, err
 		}
@@ -246,24 +261,81 @@ func sshAuth(authType string, secret repository.CredentialSecret) ([]string, []s
 				"SSH_ASKPASS=" + askpassPath,
 				"SSH_ASKPASS_REQUIRE=force",
 				"DISPLAY=ai-pub",
-				"AI_PUB_SSH_ASKPASS_PASSWORD=" + secret.Secret,
+				passwordEnv + "=" + secret.Secret,
 			}, cleanup, nil
 	default:
 		return nil, nil, func() {}, fmt.Errorf("unsupported ssh auth type %q", authType)
 	}
 }
 
-func askpassHelper() (string, func(), error) {
+func askpassHelper(passwordEnv string) (string, func(), error) {
 	dir, err := os.MkdirTemp("", "ai-pub-ssh-askpass-*")
 	if err != nil {
 		return "", func() {}, err
 	}
 	path := filepath.Join(dir, "askpass")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' \"$AI_PUB_SSH_ASKPASS_PASSWORD\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' \"$"+passwordEnv+"\"\n"), 0o700); err != nil {
 		os.RemoveAll(dir)
 		return "", func() {}, err
 	}
 	return path, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+func (s SSH) gatewayProxy(ctx context.Context, gateway *domain.Server) ([]string, []string, func(), string, error) {
+	if gateway == nil {
+		return nil, nil, func() {}, "", nil
+	}
+	if gateway.Role != "gateway" || gateway.GatewayID != "" || !gateway.Enabled {
+		return nil, nil, func() {}, "", fmt.Errorf("gateway server is not available")
+	}
+	if gateway.CredentialRef == "" || gateway.AuthType == "none" {
+		return nil, nil, func() {}, "", fmt.Errorf("gateway ssh credential is required")
+	}
+	secret, err := s.Credentials.Secret(ctx, gateway.CredentialRef)
+	if err != nil {
+		return nil, nil, func() {}, "", fmt.Errorf("gateway credential is not available")
+	}
+	authArgs, commandEnv, cleanup, err := sshAuth(gateway.AuthType, secret, "AI_PUB_SSH_GATEWAY_ASKPASS_PASSWORD")
+	if err != nil {
+		return nil, nil, func() {}, "", err
+	}
+	proxyArgs := append([]string{"ssh"}, authArgs...)
+	proxyArgs = append(proxyArgs,
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=15",
+		"-W", "%h:%p",
+		gateway.Username+"@"+gateway.Host,
+	)
+	proxyCommand := "env " + shellQuoteJoin(gatewayProxyEnv(commandEnv)) + " " + shellQuoteJoin(proxyArgs)
+	return []string{"-o", "ProxyCommand=" + proxyCommand}, gatewayProcessEnv(commandEnv), cleanup, secret.Secret, nil
+}
+
+func gatewayProxyEnv(commandEnv []string) []string {
+	result := make([]string, 0, len(commandEnv))
+	for _, value := range commandEnv {
+		if !strings.HasPrefix(value, "AI_PUB_SSH_GATEWAY_ASKPASS_PASSWORD=") {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func gatewayProcessEnv(commandEnv []string) []string {
+	result := make([]string, 0, len(commandEnv))
+	for _, value := range commandEnv {
+		if strings.HasPrefix(value, "AI_PUB_SSH_GATEWAY_ASKPASS_PASSWORD=") {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func shellQuoteJoin(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, shellQuote(value))
+	}
+	return strings.Join(parts, " ")
 }
 
 func privateKeyFile(authType string, secret repository.CredentialSecret) (string, func(), error) {
@@ -352,6 +424,13 @@ func sanitize(value string, secret string) string {
 		return value
 	}
 	return strings.ReplaceAll(value, secret, "[redacted]")
+}
+
+func sanitizeAll(value string, secrets ...string) string {
+	for _, secret := range secrets {
+		value = sanitize(value, secret)
+	}
+	return value
 }
 
 func shellQuote(value string) string {

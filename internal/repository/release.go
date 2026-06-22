@@ -285,11 +285,14 @@ func (s Store) getServersByIDsTx(ctx context.Context, tx *sql.Tx, ids []string) 
 	servers := make([]domain.Server, 0, len(ids))
 	for _, id := range ids {
 		row := tx.QueryRowContext(ctx, `
-SELECT id, name, host, port, username, auth_type, credential_ref, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at
+SELECT id, name, host, port, username, auth_type, credential_ref, role, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at
 FROM servers WHERE id = ?`, id)
 		server, err := scanServer(row)
 		if err != nil {
 			return nil, normalizeNotFound(err)
+		}
+		if server.Role != "application" {
+			return nil, fmt.Errorf("deployment targets can only include application servers")
 		}
 		servers = append(servers, server)
 	}

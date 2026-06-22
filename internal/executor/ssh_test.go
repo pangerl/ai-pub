@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"ai-pub/internal/domain"
@@ -17,6 +18,12 @@ type fakeCredentialResolver struct {
 
 func (f fakeCredentialResolver) Secret(context.Context, string) (repository.CredentialSecret, error) {
 	return f.secret, nil
+}
+
+type credentialResolverByID map[string]repository.CredentialSecret
+
+func (f credentialResolverByID) Secret(_ context.Context, id string) (repository.CredentialSecret, error) {
+	return f[id], nil
 }
 
 func TestSSHExecutorPasswordUsesAskpassWithoutLeakingSecret(t *testing.T) {
@@ -65,6 +72,52 @@ func TestSSHExecutorPrivateKeyConnectionFailureIsReadable(t *testing.T) {
 	})
 	if result.Status != "failed" {
 		t.Fatalf("expected failed result, got %#v", result)
+	}
+}
+
+func TestSSHExecutorUsesGatewayTunnelWithSeparateCredentials(t *testing.T) {
+	var captured []string
+	sshPath := filepath.Join(t.TempDir(), "ssh")
+	if err := os.WriteFile(sshPath, []byte(`#!/bin/sh
+set -eu
+test "$AI_PUB_SSH_ASKPASS_PASSWORD" = application-secret
+test "$AI_PUB_SSH_GATEWAY_ASKPASS_PASSWORD" = gateway-secret
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exec := SSH{Credentials: credentialResolverByID{
+		"app-cred": {
+			Credential: domain.Credential{Type: "password"},
+			Secret:     "application-secret",
+		},
+		"gateway-cred": {
+			Credential: domain.Credential{Type: "password"},
+			Secret:     "gateway-secret",
+		},
+	}, Command: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		captured = append([]string(nil), args...)
+		return exec.CommandContext(ctx, sshPath, args...)
+	}}
+	result := exec.Execute(context.Background(), Request{
+		Target: domain.DeploymentTarget{ScriptPath: "echo ok", TimeoutSeconds: 1},
+		Server: domain.Server{
+			Host: "app.internal", Port: 22, Username: "app-user", AuthType: "password", CredentialRef: "app-cred",
+		},
+		Gateway: &domain.Server{
+			Role: "gateway", Host: "gateway.example", Port: 2202, Username: "gateway-user", AuthType: "password", CredentialRef: "gateway-cred", Enabled: true,
+		},
+	})
+	if result.Status != "success" {
+		t.Fatalf("expected successful command setup, got %#v", result)
+	}
+	command := strings.Join(captured, " ")
+	for _, want := range []string{"ProxyCommand=env", "SSH_ASKPASS=", "gateway-user@gateway.example", "-W", "%h:%p", "app-user@app.internal"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("expected %q in ssh arguments: %s", want, command)
+		}
+	}
+	if strings.Contains(command, "application-secret") || strings.Contains(command, "gateway-secret") {
+		t.Fatalf("ssh arguments must not contain credentials: %s", command)
 	}
 }
 

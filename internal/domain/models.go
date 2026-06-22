@@ -59,6 +59,7 @@ type Server struct {
 	Username        string     `json:"username"`
 	AuthType        string     `json:"auth_type"`
 	CredentialRef   string     `json:"credential_ref"`
+	Role            string     `json:"role"`
 	GatewayID       string     `json:"gateway_id"`
 	Enabled         bool       `json:"enabled"`
 	LastCheckStatus string     `json:"last_check_status"`

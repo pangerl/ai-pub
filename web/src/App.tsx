@@ -886,7 +886,7 @@ export function App() {
                   </> : null}
                   {infrastructureView === 'runtime' ? <>
                     <InfrastructureSectionHeading eyebrow="RUNTIME" title="运行环境" description="管理发布到哪里，以及哪些服务器作为一个批次共同执行。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EntityList title="环境" data={state.environments} fields={['slug', 'is_production', 'release_frozen']} /><EntityList title="服务器" data={state.servers} fields={['host', 'username', 'last_check_status']} /><ServerGroupList data={state.serverGroups} state={state} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
+                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EntityList title="环境" data={state.environments} fields={['slug', 'is_production', 'release_frozen']} /><EntityList title="服务器" data={state.servers} fields={['host', 'role', 'username', 'last_check_status']} /><ServerGroupList data={state.serverGroups} state={state} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm servers={state.servers} credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
                     <section className="surface infrastructure-maintenance"><SectionTitle title="维护与发布保护" meta="MANAGE" /><div className="infrastructure-maintenance-grid"><div><h3>环境</h3><EnvironmentEditor environments={state.environments} onDone={() => void refreshAll()} /></div><div><h3>服务器与 SSH</h3><ServerEditor servers={state.servers} credentials={state.credentials} onDone={() => void refreshAll()} /></div><div><h3>服务器组</h3><ServerGroupEditor groups={state.serverGroups} servers={state.servers} onDone={() => void refreshAll()} /></div></div></section>
                   </> : null}
                   {infrastructureView === 'targeting' ? <>
@@ -1262,10 +1262,12 @@ function ServerEditor({ servers, credentials, onDone }: { servers: Entity[]; cre
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
   const selected = findByID(servers, selectedID);
+  const role = Form.useWatch('role', form);
+  const gateways = servers.filter((server) => server.role === 'gateway' && server.enabled !== false && String(server.id) !== selectedID);
   function choose(id: string) { const item = findByID(servers, id); setSelectedID(id); form.setFieldsValue(item); setTestResult(''); }
   async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/servers/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
   async function test() { if (!selectedID) return; setTesting(true); setTestResult(''); try { const body = await apiPost<{ server: Entity; result: Entity }>(`/api/v1/servers/${selectedID}/test`, {}); setTestResult(`${body.result.status}: ${body.result.error_message ?? body.result.log_output ?? '连接成功'}`); onDone(); } catch (err) { setTestResult(err instanceof Error ? err.message : '连接测试失败'); } finally { setTesting(false); } }
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择服务器"><Select value={selectedID || undefined} placeholder="选择服务器" options={servers.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="host" label="Host" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="port" label="Port"><Input type="number" min={1} /></Form.Item><Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="auth_type" label="认证方式"><Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }, { label: 'none', value: 'none' }]} /></Form.Item><Form.Item name="credential_ref" label="凭据"><Select allowClear options={credentials.map(entityOption)} /></Form.Item><Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Space wrap><Button type="primary" htmlType="submit" loading={loading}>保存服务器</Button><Button loading={testing} onClick={() => void test()}>测试 SSH</Button></Space>{testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected.last_check_status ?? '未测试'} / {selected.last_check_at ?? '-'}</Typography.Text>}</> : <div className="form-empty">选择一台服务器开始编辑或测试。</div>}</Form>;
+  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择服务器"><Select value={selectedID || undefined} placeholder="选择服务器" options={servers.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="role" label="服务器角色" rules={[{ required: true }]}><Select options={[{ label: '应用服务器', value: 'application' }, { label: '网关服务器', value: 'gateway' }]} onChange={() => form.setFieldsValue({ gateway_id: undefined })} /></Form.Item><Form.Item name="host" label="Host" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="port" label="Port"><Input type="number" min={1} /></Form.Item><Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="auth_type" label="认证方式"><Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }, { label: 'none', value: 'none' }]} /></Form.Item><Form.Item name="credential_ref" label="凭据"><Select allowClear options={credentials.map(entityOption)} /></Form.Item>{role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接，不能再配置上游网关。</Typography.Text>}<Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Space wrap><Button type="primary" htmlType="submit" loading={loading}>保存服务器</Button><Button loading={testing} onClick={() => void test()}>测试 SSH</Button></Space>{testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected.last_check_status ?? '未测试'} / {selected.last_check_at ?? '-'}</Typography.Text>}</> : <div className="form-empty">选择一台服务器开始编辑或测试。</div>}</Form>;
 }
 
 function ServerGroupEditor({ groups, servers, onDone }: { groups: Entity[]; servers: Entity[]; onDone: () => void }) {
@@ -1430,10 +1432,12 @@ function EnvironmentForm({ onDone }: { onDone: (environment: Entity) => void }) 
   );
 }
 
-function ServerForm({ credentials, onDone }: { credentials: Entity[]; onDone: (server: Entity) => void }) {
+function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; credentials: Entity[]; onDone: (server: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const authType = Form.useWatch('auth_type', form);
+  const role = Form.useWatch('role', form);
+  const gateways = servers.filter((server) => server.role === 'gateway' && server.enabled !== false);
   async function submit(values: Entity) {
     setLoading(true);
     try {
@@ -1448,9 +1452,12 @@ function ServerForm({ credentials, onDone }: { credentials: Entity[]; onDone: (s
     }
   }
   return (
-    <Form form={form} layout="vertical" initialValues={{ port: 22, auth_type: 'none' }} onFinish={(values) => void submit(values)}>
+    <Form form={form} layout="vertical" initialValues={{ port: 22, auth_type: 'none', role: 'application' }} onFinish={(values) => void submit(values)}>
       <Form.Item name="name" label="名称" rules={[{ required: true }]}>
         <Input />
+      </Form.Item>
+      <Form.Item name="role" label="服务器角色" rules={[{ required: true }]}>
+        <Select options={[{ label: '应用服务器', value: 'application' }, { label: '网关服务器', value: 'gateway' }]} onChange={() => form.setFieldsValue({ gateway_id: undefined })} />
       </Form.Item>
       <Form.Item name="host" label="Host" rules={[{ required: true }]}>
         <Input />
@@ -1477,6 +1484,7 @@ function ServerForm({ credentials, onDone }: { credentials: Entity[]; onDone: (s
       >
         <Select allowClear options={credentials.map(entityOption)} disabled={authType === 'none'} />
       </Form.Item>
+      {role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接；应用服务器经它建立隧道后仍使用自己的凭据登录。</Typography.Text>}
       <Button type="primary" htmlType="submit" loading={loading}>
         创建服务器
       </Button>

@@ -180,7 +180,8 @@ NotificationConfig 1 -- n NotificationDelivery
 | `username` | SSH 用户 |
 | `auth_type` | `password` 或 `private_key` |
 | `credential_ref` | 凭据引用 |
-| `gateway_id` | 网关，可空 |
+| `role` | `gateway` 或 `application` |
+| `gateway_id` | 应用服务器使用的网关，可空；为空时直连 |
 | `enabled` | 是否启用 |
 | `last_check_status` | 最近连接测试状态 |
 | `last_check_at` | 最近连接测试时间 |
@@ -190,6 +191,9 @@ NotificationConfig 1 -- n NotificationDelivery
 
 - 密码、私钥不以明文字段保存。
 - API、日志、事件不得输出敏感凭据。
+- 网关服务器只能由发布服务直连；应用服务器可直连，或通过一个网关建立 SSH 隧道。
+- 经网关时，网关使用自身凭据建立隧道，应用服务器仍使用自身凭据建立最终 SSH 会话；不支持多跳。
+- 发布目标只能包含应用服务器，不能把网关作为脚本执行目标。
 
 ### 4.8 ServerGroup
 

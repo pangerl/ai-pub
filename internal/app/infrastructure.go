@@ -26,7 +26,15 @@ func (s InfrastructureService) TestServer(ctx context.Context, id string) (domai
 	if server.AuthType != "private_key" && server.AuthType != "password" {
 		return domain.Server{}, repository.ServerResult{}, errors.New("server must use password or private_key authentication")
 	}
-	result := (executor.SSH{Credentials: s.credentials}).Check(ctx, server)
+	var gateway *domain.Server
+	if server.GatewayID != "" {
+		item, err := s.store.GetServer(ctx, server.GatewayID)
+		if err != nil {
+			return domain.Server{}, repository.ServerResult{}, errors.New("gateway server is not available")
+		}
+		gateway = &item
+	}
+	result := (executor.SSH{Credentials: s.credentials}).Check(ctx, server, gateway)
 	status := result.Status
 	if _, err := s.store.UpdateServerCheck(ctx, id, status); err != nil {
 		return domain.Server{}, repository.ServerResult{}, err

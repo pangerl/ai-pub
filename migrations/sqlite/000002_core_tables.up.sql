@@ -61,6 +61,7 @@ CREATE TABLE servers (
   username TEXT NOT NULL,
   auth_type TEXT NOT NULL CHECK (auth_type IN ('password', 'private_key', 'none')),
   credential_ref TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'application' CHECK (role IN ('gateway', 'application')),
   gateway_id TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   last_check_status TEXT NOT NULL DEFAULT '',

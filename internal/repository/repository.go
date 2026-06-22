@@ -253,19 +253,25 @@ func (s Store) CreateServer(ctx context.Context, item domain.Server) (domain.Ser
 	if item.Port == 0 {
 		item.Port = 22
 	}
+	if item.Role == "" {
+		item.Role = "application"
+	}
+	if err := s.validateServerGateway(ctx, item); err != nil {
+		return domain.Server{}, err
+	}
 	item.Enabled = true
 	item.CreatedAt = now
 	item.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO servers (id, name, host, port, username, auth_type, credential_ref, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Host, item.Port, item.Username, item.AuthType, item.CredentialRef, item.GatewayID, boolInt(item.Enabled), item.LastCheckStatus, nullableTimePtr(item.LastCheckAt), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+INSERT INTO servers (id, name, host, port, username, auth_type, credential_ref, role, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.Name, item.Host, item.Port, item.Username, item.AuthType, item.CredentialRef, item.Role, item.GatewayID, boolInt(item.Enabled), item.LastCheckStatus, nullableTimePtr(item.LastCheckAt), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
 	return item, err
 }
 
 func (s Store) ListServers(ctx context.Context) ([]domain.Server, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, host, port, username, auth_type, credential_ref, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at
+SELECT id, name, host, port, username, auth_type, credential_ref, role, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at
 FROM servers ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
@@ -284,7 +290,7 @@ FROM servers ORDER BY created_at DESC, id DESC`)
 
 func (s Store) GetServer(ctx context.Context, id string) (domain.Server, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, name, host, port, username, auth_type, credential_ref, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at
+SELECT id, name, host, port, username, auth_type, credential_ref, role, gateway_id, enabled, last_check_status, last_check_at, created_at, updated_at
 FROM servers WHERE id = ?`, id)
 	item, err := scanServer(row)
 	return item, normalizeNotFound(err)
@@ -303,13 +309,58 @@ func (s Store) UpdateServer(ctx context.Context, id string, item domain.Server) 
 	existing.Username = choose(item.Username, existing.Username)
 	existing.AuthType = choose(item.AuthType, existing.AuthType)
 	existing.CredentialRef = item.CredentialRef
+	existing.Role = choose(item.Role, existing.Role)
 	existing.GatewayID = item.GatewayID
 	existing.Enabled = item.Enabled
+	if err := s.validateServerGateway(ctx, existing); err != nil {
+		return domain.Server{}, err
+	}
 	existing.UpdatedAt = nowUTC()
 	_, err = s.db.ExecContext(ctx, `
-UPDATE servers SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, credential_ref = ?, gateway_id = ?, enabled = ?, updated_at = ? WHERE id = ?`,
-		existing.Name, existing.Host, existing.Port, existing.Username, existing.AuthType, existing.CredentialRef, existing.GatewayID, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
+UPDATE servers SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, credential_ref = ?, role = ?, gateway_id = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Host, existing.Port, existing.Username, existing.AuthType, existing.CredentialRef, existing.Role, existing.GatewayID, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
 	return existing, err
+}
+
+func (s Store) validateServerGateway(ctx context.Context, item domain.Server) error {
+	if item.Role != "gateway" && item.Role != "application" {
+		return fmt.Errorf("server role must be gateway or application")
+	}
+	if item.Role == "gateway" && item.GatewayID != "" {
+		return fmt.Errorf("gateway server cannot use another gateway")
+	}
+	if item.GatewayID == "" {
+		var dependentCount int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM servers WHERE gateway_id = ? AND id <> ?`, item.ID, item.ID).Scan(&dependentCount); err != nil {
+			return err
+		}
+		if dependentCount > 0 {
+			if item.Role != "gateway" {
+				return fmt.Errorf("gateway server is used by application servers and must remain a gateway")
+			}
+			if !item.Enabled {
+				return fmt.Errorf("gateway server is used by application servers and cannot be disabled")
+			}
+		}
+		return nil
+	}
+	if item.GatewayID == item.ID {
+		return fmt.Errorf("server cannot use itself as gateway")
+	}
+	gateway, err := s.GetServer(ctx, item.GatewayID)
+	if err != nil {
+		return fmt.Errorf("gateway server is not available: %w", err)
+	}
+	if gateway.Role != "gateway" {
+		return fmt.Errorf("selected server is not a gateway")
+	}
+	if !gateway.Enabled {
+		return fmt.Errorf("gateway server is disabled")
+	}
+	if item.Role != "application" {
+		return fmt.Errorf("only application server can use a gateway")
+	}
+	return nil
 }
 
 func (s Store) UpdateServerCheck(ctx context.Context, id, status string) (domain.Server, error) {
@@ -796,7 +847,7 @@ func scanServer(row rowScanner) (domain.Server, error) {
 	var enabled int
 	var lastCheckAt sql.NullString
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.Name, &item.Host, &item.Port, &item.Username, &item.AuthType, &item.CredentialRef, &item.GatewayID, &enabled, &item.LastCheckStatus, &lastCheckAt, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.Name, &item.Host, &item.Port, &item.Username, &item.AuthType, &item.CredentialRef, &item.Role, &item.GatewayID, &enabled, &item.LastCheckStatus, &lastCheckAt, &createdAt, &updatedAt)
 	item.Enabled = enabled == 1
 	if lastCheckAt.Valid {
 		t := parseTime(lastCheckAt.String)
