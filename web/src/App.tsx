@@ -332,7 +332,7 @@ export function App() {
       const currentDeployID = activeDeployID || undefined;
       const serverLogs = currentDeployID ? await apiGet<Entity[]>(`/api/v1/deploy-records/${currentDeployID}/server-logs`) : [];
       setHealth(healthBody);
-      if (preferredReleaseID !== undefined || activeReleaseID) {
+      if (releaseID) {
         setActiveRelease(refreshedActiveRelease ?? null);
       }
       setState({
