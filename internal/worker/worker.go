@@ -81,6 +81,9 @@ func (s Service) RunOnce(ctx context.Context) error {
 		if failed {
 			break
 		}
+		if err := s.store.MarkServerRunning(ctx, claimed.Record.ID, server.ID); err != nil {
+			return err
+		}
 		result := s.execute(execCtx, claimed, server)
 		if err := heartbeatError(heartbeatErrors); err != nil {
 			return err

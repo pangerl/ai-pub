@@ -58,7 +58,7 @@ AND NOT EXISTS (
   JOIN deploy_records running_record ON running_record.id = running.deploy_record_id
   WHERE candidate.deploy_record_id = dr.id
     AND running_record.status = 'running'
-    AND running.status = 'running'
+    AND running.status IN ('queued', 'running')
 )
 AND env.release_frozen = 0
 ORDER BY dr.created_at ASC, dr.id ASC
@@ -96,11 +96,6 @@ UPDATE release_requests SET status = 'running', updated_at = ? WHERE id = ? AND 
 	}
 	if affected != 1 {
 		return ClaimedDeploy{}, ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE server_deploy_logs SET status = 'running', started_at = ? WHERE deploy_record_id = ? AND status = 'queued'`,
-		formatTime(now), record.ID); err != nil {
-		return ClaimedDeploy{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return ClaimedDeploy{}, err
@@ -271,6 +266,26 @@ SET status = ?, exit_code = ?, finished_at = ?, duration_ms = ?, log_output = ?,
 WHERE deploy_record_id = ? AND server_id = ?`,
 		result.Status, nullableInt(result.ExitCode), formatTime(now), result.DurationMS, result.LogOutput, result.ErrorCode, result.ErrorMessage, deployRecordID, serverID)
 	return err
+}
+
+func (s Store) MarkServerRunning(ctx context.Context, deployRecordID string, serverID string) error {
+	now := nowUTC()
+	res, err := s.db.ExecContext(ctx, `
+UPDATE server_deploy_logs
+SET status = 'running', started_at = ?
+WHERE deploy_record_id = ? AND server_id = ? AND status = 'queued'`,
+		formatTime(now), deployRecordID, serverID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s Store) MarkQueuedServersSkipped(ctx context.Context, deployRecordID string, message string) error {

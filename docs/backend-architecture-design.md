@@ -120,15 +120,14 @@ HTTP request
 
 1. 按创建时间选择 `queued` 发布记录。
 2. 确认发布单仍处于可执行状态。
-3. 确认目标服务器没有 running 发布。
-4. 更新发布记录为 `running`。
-5. 更新服务器日志为 `running`。
-6. 写入 Worker 标识、心跳和租约时间。
-7. 写入 `deploy_started` 事件。
+3. 确认目标服务器未被其他 running 发布占用；当前发布记录中 `queued` 和 `running` 的服务器都视为占用。
+4. 更新发布记录为 `running`，服务器日志保持 `queued`。
+5. 写入 Worker 标识、心跳和租约时间。
+6. 写入 `deploy_started` 事件。
 
 ### 6.5 执行结果回写
 
-每台服务器执行结束后事务内：
+多服务器按稳定顺序逐台执行。每台服务器真正开始执行时，先将对应 `ServerDeployLog` 从 `queued` 更新为 `running` 并记录开始时间；其余服务器继续保持 `queued`。每台服务器执行结束后事务内：
 
 1. 更新 `ServerDeployLog`。
 2. 聚合当前 `DeployRecord` 计数。
@@ -161,6 +160,7 @@ tick
 - 租约 TTL 不得小于命令执行超时时间。
 - 僵尸任务通过心跳超时识别，并标记失败或待人工处理。
 - 多服务器发布按顺序执行，某台失败后 fail-fast，未执行服务器标记 `skipped`。
+- 发布记录进入 `running` 不代表所有服务器已开始；服务器级日志以 `queued -> running -> 终态` 表示实际进度。
 
 ## 8. 执行器 contract
 

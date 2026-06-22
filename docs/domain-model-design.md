@@ -366,6 +366,7 @@ running -> failed
 约束：
 
 - 日志不得包含未脱敏密码、私钥、token。
+- 发布记录被 Worker 领取后，未开始执行的服务器仍为 `queued`；仅在实际开始该服务器时进入 `running` 并写入 `started_at`。
 - 多服务器 fail-fast 后未执行服务器标记为 `skipped`。
 
 ### 4.14 ServerDeploymentState

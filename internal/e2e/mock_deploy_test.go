@@ -56,6 +56,66 @@ func TestSQLiteMockDeployWithServerGroupTarget(t *testing.T) {
 	runMockRelease(t, ctx, db, store, fixture, target, "success")
 }
 
+func TestSQLiteClaimedServerGroupKeepsUnstartedServersQueued(t *testing.T) {
+	_, store := newE2EStore(t)
+	ctx := context.Background()
+	fixture := seedE2E(t, store)
+	second, err := store.CreateServer(ctx, domain.Server{Name: "mock-2", Host: "127.0.0.2", Username: "deploy", AuthType: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := store.CreateServerGroup(ctx, domain.ServerGroup{
+		Name:      "ordered-group",
+		ServerIDs: []string{fixture.server.ID, second.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.CreateDeploymentTarget(ctx, domain.DeploymentTarget{
+		ServiceID:     fixture.service.ID,
+		EnvironmentID: fixture.env.ID,
+		ExecutorType:  "mock",
+		TargetType:    "server_group",
+		TargetRefID:   group.ID,
+		EnvVars:       "{}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queued := createQueuedRelease(t, ctx, app.NewReleaseService(store), fixture, target)
+	claimed, err := store.ClaimNextDeploy(ctx, "test_worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.Release.ID != queued.ID || len(claimed.Servers) != 2 {
+		t.Fatalf("expected claimed two-server release, got %#v", claimed)
+	}
+	logs, err := store.ListServerDeployLogs(ctx, claimed.Record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, log := range logs {
+		if log.Status != "queued" {
+			t.Fatalf("expected unstarted servers to remain queued, got %#v", logs)
+		}
+	}
+	if err := store.MarkServerRunning(ctx, claimed.Record.ID, claimed.Servers[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	logs, err = store.ListServerDeployLogs(ctx, claimed.Record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[string]string{}
+	for _, log := range logs {
+		statuses[log.ServerID] = log.Status
+	}
+	if statuses[claimed.Servers[0].ID] != "running" || statuses[claimed.Servers[1].ID] != "queued" {
+		t.Fatalf("expected only the current server to run, got %#v", logs)
+	}
+}
+
 func TestSQLiteMockDeployPartialSkipsRemainingServers(t *testing.T) {
 	db, store := newE2EStore(t)
 	ctx := context.Background()
