@@ -4,7 +4,7 @@
 
 ## 当前开发阶段
 
-已完成 M0 工程骨架、M1 基础配置 API、M2 发布单门禁、M3 Mock/Dry-run 发布闭环、M4 SSH 基础能力、M5 前端工作台和 M6 通知能力。运行时统一使用 MySQL 8；开发、验收和生产不再支持 SQLite。
+本地 MVP 已完成。运行时统一使用 MySQL 8；开发、验收和生产不再支持 SQLite。当前基线以 `make verify` 和 `make compose-check` 为验收入口；后者从空 MySQL 数据库重建并验证容器内发布闭环。
 
 - Go 后端入口和 `/healthz`。
 - MySQL 配置加载和 migration runner；`MIGRATION_AUTO=false` 可跳过启动自动迁移，`MIGRATION_CHECK_ONLY=true` 只检查待执行 migration 后退出。
@@ -68,7 +68,7 @@ open http://127.0.0.1:18080/
 
 ```bash
 make verify        # Go 单元测试与前端构建检查
-make local-check   # MySQL 8 + 后端 + 前端 + 容器内发布闭环
+make compose-check # MySQL 8 + 后端 + 前端 + 容器内发布闭环
 ```
 
 停止并删除验收数据：

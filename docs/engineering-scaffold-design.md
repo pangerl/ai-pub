@@ -128,7 +128,7 @@ make verify
 端到端 demo：
 
 ```bash
-make local-check
+make compose-check
 ```
 
 具体测试包名可在实现阶段调整，但必须保留等价验证命令。

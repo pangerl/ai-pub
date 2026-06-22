@@ -14,10 +14,10 @@ docker compose up --build -d
 
 ## 自动验证
 
-执行：
+执行当前容器化验收入口：
 
 ```bash
-make local-check
+make compose-check
 ```
 
 脚本会自动完成：
@@ -39,7 +39,7 @@ make local-check
 [local-check] local functional check passed
 ```
 
-`make compose-check` 保留为与 `make local-check` 等价的兼容入口。可选直接执行 Compose 验收容器：
+`make local-check` 是保留的兼容别名。可选直接执行 Compose 验收容器：
 
 ```bash
 docker compose --profile verify up --build --abort-on-container-exit --exit-code-from verify verify

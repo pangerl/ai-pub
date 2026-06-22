@@ -1,6 +1,6 @@
 # 发布系统技术文档索引
 
-本文档目录用于承接 `project-requirements.md` 和 `technical-docs-breakdown.md`，指导后续开发实现。
+本文档目录记录已完成 MVP 的实现设计、验收方法和当前边界。产品需求基线见根目录的 `project-requirements.md`。
 
 建议阅读顺序：
 
@@ -11,8 +11,7 @@
 5. `DESIGN.md`：前端视觉语言、颜色、排版、组件和页面布局规范。
 6. `engineering-scaffold-design.md`：目录结构、配置、migration、测试和本地 demo。
 7. `notification-design.md`：企业微信机器人 webhook 通知和渠道扩展点。
-8. `development-plan.md`：开发阶段、交付物和验证命令。
-9. `development-completion-audit.md`：当前开发完成审查、已验证范围和暂缓项。
+8. `development-completion-audit.md`：当前开发完成审查、已验证范围、验收入口和暂缓项。
 
 第一版实现时应始终遵守：
 
@@ -21,4 +20,4 @@
 - 审计只要求关键动作可追溯、可查询，不设计不可篡改账本。
 - 企业微信通知使用机器人 webhook，不做企业微信应用消息。
 
-当前容器化验收范围见 `development-completion-audit.md` 和 `local-verification.md`。
+当前容器化验收范围和命令见 `development-completion-audit.md` 与 `local-verification.md`。

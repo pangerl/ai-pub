@@ -1547,7 +1547,7 @@ AI Agent 接入必须在 Web/API + React 最小管理界面已经跑通基础发
 
 后续建议按以下产物继续拆分：
 
-技术文档拆分说明见 `technical-docs-breakdown.md`。
+已落地的技术设计和当前验收状态见 `docs/README.md` 与 `docs/development-completion-audit.md`。
 
 1. 领域模型设计：明确表结构、状态机和事件模型。
 2. Go 后端架构设计：明确服务边界、事务边界、队列调度、执行器 contract。
