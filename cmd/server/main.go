@@ -37,6 +37,9 @@ func run() error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if cfg.AppEnv != "prod" && cfg.JWTSecret == "dev-secret-change-me" {
+		slog.Warn("JWT_SECRET 使用不安全默认值；共享开发环境前请设置独立密钥")
+	}
 
 	db, err := openDB(cfg)
 	if err != nil {
