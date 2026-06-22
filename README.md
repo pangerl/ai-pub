@@ -93,6 +93,7 @@ make compose-down
 - `PATCH /environments/{id}`
 - `GET/POST /servers`
 - `PATCH /servers/{id}`
+- `POST /servers/test`
 - `POST /servers/{id}/test`
 - `GET/POST /server-groups`
 - `PATCH /server-groups/{id}`

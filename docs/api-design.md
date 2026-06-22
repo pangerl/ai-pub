@@ -126,7 +126,7 @@ API Key scope：
 | `POST` | `/auth/login` | 登录 |
 | `GET` | `/auth/me` | 当前用户 |
 | `POST` | `/auth/logout` | 退出登录 |
-| `GET` | `/users` | 用户列表，管理员 |
+| `GET` | `/users` | 用户列表；管理员返回完整字段，普通用户仅返回用户目录（id、username、display_name） |
 | `POST` | `/users` | 创建用户，管理员 |
 | `PATCH` | `/users/{id}` | 更新用户，管理员 |
 | `GET` | `/api-keys` | API Key 列表；普通用户仅返回自己的 Key，管理员返回全部 |
@@ -168,6 +168,7 @@ API Key 创建响应只返回一次明文。
 | `GET` | `/servers` | 服务器列表 |
 | `POST` | `/servers` | 创建服务器 |
 | `PATCH` | `/servers/{id}` | 更新服务器 |
+| `POST` | `/servers/test` | 校验未落库的服务器配置，不更新最近测试状态 |
 | `POST` | `/servers/{id}/test` | 测试 SSH 连接 |
 | `GET` | `/server-groups` | 服务器组列表 |
 | `POST` | `/server-groups` | 创建服务器组 |

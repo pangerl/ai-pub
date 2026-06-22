@@ -81,6 +81,25 @@ func withAdmin(store repository.Store, jwtSecret string, next http.HandlerFunc) 
 	}
 }
 
+// withSessionUser 允许任意已登录会话用户访问；管理员 API 密钥亦可。
+// 普通用户仅用于读取用户目录等最小展示场景。
+func withSessionUser(store repository.Store, jwtSecret string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := currentSessionUser(r); ok {
+			next(w, r)
+			return
+		}
+		if jwtSecret == "" && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			next(w, r)
+			return
+		}
+		if _, ok := authorizeOptionalAPIKey(w, r, store, "admin:write"); !ok {
+			return
+		}
+		next(w, r)
+	}
+}
+
 var (
 	errUnauthorized = errors.New("invalid api key")
 	errForbidden    = errors.New("api key scope is not allowed")

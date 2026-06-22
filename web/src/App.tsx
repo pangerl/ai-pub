@@ -314,7 +314,7 @@ export function App() {
         apiGet<Entity[]>('/api/v1/servers'),
         apiGet<Entity[]>('/api/v1/server-groups'),
         apiGet<Entity[]>('/api/v1/deployment-targets'),
-        currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/users') : Promise.resolve([]),
+        apiGet<Entity[]>('/api/v1/users'),
         apiGet<Entity[]>('/api/v1/api-keys'),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/credentials') : Promise.resolve([]),
         apiGet<Entity[]>('/api/v1/release-requests'),
@@ -724,7 +724,7 @@ export function App() {
           </nav>
           <div className="header-actions">
             <span className={`health-dot ${status === 'ok' ? 'ok' : ''}`} title={`服务状态：${status}`} />
-            <span className="current-user">{currentUser.display_name ?? currentUser.username} <small>{currentUser.role}</small></span>
+            <span className="current-user">{currentUser.display_name ?? currentUser.username} <small>{roleLabel(currentUser.role)}</small></span>
             <Button className="quiet-button" onClick={() => setPage('api-keys')}>访问密钥</Button>
             <Button className="quiet-button" onClick={() => void refreshAll()}>刷新</Button>
             <Button className="quiet-button" onClick={() => void signOut()}>退出</Button>
@@ -823,7 +823,7 @@ export function App() {
                       </div>
                     </section>
                     <section className="surface"><SectionTitle title="发布信息" meta="REQUEST" /><KeyValueGrid values={[
-                      ['服务', selected.service?.name], ['环境', selected.environment?.name], ['版本', selected.version?.version], ['部署目标', formatTarget(selected.target, selected.targetRef)], ['来源', activeRelease.source], ['申请人', formatActor(activeRelease.created_by_type, activeRelease.created_by_id, state)], ['创建时间', activeRelease.created_at], ['更新时间', activeRelease.updated_at],
+                      ['服务', selected.service?.name], ['环境', selected.environment?.name], ['版本', selected.version?.version], ['部署目标', formatTarget(selected.target, selected.targetRef)], ['来源', activeRelease.source], ['申请人', formatActor(activeRelease.created_by_type, activeRelease.created_by_id, state)], ['授权人', formatActor('user', activeRelease.authorized_by_user_id, state)], ['确认人', activeRelease.confirmed_by_user_id ? `${formatActor('user', activeRelease.confirmed_by_user_id, state)}${activeRelease.confirmed_at ? ` · ${formatDateTime(activeRelease.confirmed_at)}` : ''}` : ''], ['驳回人', activeRelease.rejected_by_user_id ? `${formatActor('user', activeRelease.rejected_by_user_id, state)}${activeRelease.rejected_reason ? ` · ${activeRelease.rejected_reason}` : ''}` : ''], ['创建时间', formatDateTime(activeRelease.created_at)], ['更新时间', formatDateTime(activeRelease.updated_at)],
                     ]} /></section>
                     <section className="surface"><SectionTitle title="预检与门禁" meta="PREFLIGHT" /><PreflightPanel result={preflight} /></section>
                     <section className="surface"><SectionTitle title="关联发布记录" meta="DEPLOY RECORDS" /><DeployRows data={activeReleaseDeploys} state={state} releases={releaseByID} onOpen={(item) => { void selectDeploy(String(item.id)); setPage('deploys'); }} /></section>
@@ -843,7 +843,7 @@ export function App() {
                 <DeployRows data={filteredDeploys} state={state} releases={releaseByID} onOpen={(item) => void selectDeploy(String(item.id))} />
               </section>
               {activeDeploy ? <section className="surface deploy-detail"><SectionTitle title="执行快照" meta={`DEPLOY ${shortID(activeDeploy.id)}`} /><KeyValueGrid values={[
-                ['状态', activeDeploy.status], ['执行器', activeDeploy.executor_type], ['创建时间', activeDeploy.created_at], ['更新时间', activeDeploy.updated_at], ['目标服务器数', activeDeploy.total_servers], ['成功 / 失败 / 跳过', `${activeDeploy.success_servers ?? 0} / ${activeDeploy.failed_servers ?? 0} / ${activeDeploy.skipped_servers ?? 0}`],
+                ['状态', activeDeploy.status], ['执行器', activeDeploy.executor_type], ['创建时间', formatDateTime(activeDeploy.created_at)], ['更新时间', formatDateTime(activeDeploy.updated_at)], ['目标服务器数', activeDeploy.total_servers], ['成功 / 失败 / 跳过', `${activeDeploy.success_servers ?? 0} / ${activeDeploy.failed_servers ?? 0} / ${activeDeploy.skipped_servers ?? 0}`],
               ]} /><JsonPreview value={activeDeploy.target_snapshot} /></section> : null}
               <section className="surface logs-surface"><SectionTitle title="服务器日志" meta={activeDeployID ? `DEPLOY ${shortID(activeDeployID)}` : 'SELECT A DEPLOY RECORD'} /><ServerLogRows data={state.serverLogs} state={state} /></section>
             </>
@@ -911,13 +911,13 @@ export function App() {
               <div className="management-workspace">
                 {managementView === 'overview' ? <><section className="surface management-summary"><SectionTitle title="管理状态" meta="CONTROL PLANE" /><div className="management-stat-grid"><ManagementStat label="可用用户" value={state.users.filter((item) => item.enabled !== false).length} note="可登录并参与发布" onClick={() => setManagementView('users')} /><ManagementStat label="启用访问密钥" value={state.apiKeys.filter((item) => item.enabled !== false).length} note="供 CI/CD 和脚本调用" onClick={() => setManagementView('access')} /><ManagementStat label="启用通知" value={state.notificationConfigs.filter((item) => item.enabled !== false).length} note="企业微信机器人" onClick={() => setManagementView('notifications')} /><ManagementStat label="投递异常" value={state.notificationDeliveries.filter((item) => item.status !== 'sent').length} note="查看最近失败原因" onClick={() => setManagementView('notifications')} /></div></section><section className="surface management-guide"><span className="mono-label">日常管理</span><h2>只在需要时打开对应的管理面板。</h2><div><button onClick={() => setManagementView('users')}>新增发布用户 <span>用户与权限 →</span></button><button onClick={() => setManagementView('access')}>创建 CI/CD 访问密钥 <span>集成访问密钥 →</span></button><button onClick={() => setManagementView('notifications')}>测试通知机器人 <span>通知与投递 →</span></button></div></section></> : null}
                 {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建用户" meta="CREATE" /><UserForm onDone={(user) => refreshWithSelection({ userID: String(user.id ?? '') })} /></section></div></> : null}
-                {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建集成访问密钥" meta="CREATE" /><APIKeyForm users={state.users} onDone={() => void refreshAll()} /></section></div></> : null}
+                {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建集成访问密钥" meta="CREATE" /><APIKeyForm users={state.users} onDone={() => void refreshAll()} /></section></div></> : null}
                 {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="新增通知配置" meta="CREATE" /><NotificationForm onDone={() => void refreshAll()} /></section></div><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><EntityList title="最近投递" data={state.notificationDeliveries} fields={['event_type', 'status', 'last_error']} /></section></> : null}
                 {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据只供服务器 SSH 连接引用；Secret 不会在创建后再次展示。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><EntityList title="凭据" data={state.credentials} fields={['type', 'enabled', 'description']} /></section><section className="surface management-actions"><SectionTitle title="保存连接凭据" meta="CREATE" /><CredentialForm onDone={() => void refreshAll()} /></section></div></> : null}
               </div>
             </section>
           </> : null}
-          {page === 'api-keys' ? <><PageHeading eyebrow="PERSONAL ACCESS" title="个人访问密钥" description="为 CI/CD 或本地脚本创建受 scope 限制的访问凭证。" /><section className="surface access-key-brief"><div><span className="mono-label">使用边界</span><h2>密钥只在创建时显示一次。</h2><p>请立即保存到受保护的 CI/CD 变量中。禁用或删除后，使用它的调用会立刻失效。</p></div><div className="access-key-facts"><span><b>{state.apiKeys.length}</b> 已创建</span><span><b>{state.apiKeys.filter((item) => item.enabled !== false).length}</b> 已启用</span><span>密钥归属当前登录用户</span></div></section><section className="access-key-layout"><div className="access-key-workspace"><section className="surface access-key-inventory"><SectionTitle title="我的访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} onDone={() => void refreshAll()} /></section><section className="surface access-key-guide"><span className="mono-label">最小权限</span><h2>只授予调用真正需要的 scopes。</h2><p>发布创建、确认、回滚和读取日志分别对应不同 scope；生产发布依然受管理员确认约束。</p></section></div><section className="surface access-key-create"><SectionTitle title="创建访问密钥" meta="CREATE" /><APIKeyForm users={[]} ownKey onDone={() => void refreshAll()} /></section></section></> : null}
+          {page === 'api-keys' ? <><PageHeading eyebrow="PERSONAL ACCESS" title="个人访问密钥" description="为 CI/CD 或本地脚本创建受 scope 限制的访问凭证。" /><section className="surface access-key-brief"><div><span className="mono-label">使用边界</span><h2>密钥只在创建时显示一次。</h2><p>请立即保存到受保护的 CI/CD 变量中。禁用或删除后，使用它的调用会立刻失效。</p></div><div className="access-key-facts"><span><b>{state.apiKeys.length}</b> 已创建</span><span><b>{state.apiKeys.filter((item) => item.enabled !== false).length}</b> 已启用</span><span>密钥归属当前登录用户</span></div></section><section className="access-key-layout"><div className="access-key-workspace"><section className="surface access-key-inventory"><SectionTitle title="我的访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section><section className="surface access-key-guide"><span className="mono-label">最小权限</span><h2>只授予调用真正需要的 scopes。</h2><p>发布创建、确认、回滚和读取日志分别对应不同 scope；生产发布依然受管理员确认约束。</p></section></div><section className="surface access-key-create"><SectionTitle title="创建访问密钥" meta="CREATE" /><APIKeyForm users={[]} ownKey onDone={() => void refreshAll()} /></section></section></> : null}
         </main>
       </div>
     </ConfigProvider>
@@ -992,7 +992,13 @@ function EventRows({ data, state }: { data: Entity[]; state: AppState }) {
 
 function ServerLogRows({ data, state }: { data: Entity[]; state: AppState }) {
   if (data.length === 0) return <div className="inline-empty">选择一条发布记录查看服务器日志。</div>;
-  return <div className="server-log-list">{data.map((item) => <article className="server-log-row" key={String(item.id)}><div><strong>{formatServerRef(item.server_id, state)}</strong><StatusTag value={String(item.status)} /></div><small>{`开始：${item.started_at ?? '—'} · 结束：${item.finished_at ?? '—'} · 耗时：${item.duration_ms ?? 0}ms`}</small>{item.error_code ? <code>{item.error_code}</code> : null}<pre>{String(item.error_message ?? item.log_output ?? '暂无输出')}</pre></article>)}</div>;
+  return <div className="server-log-list">{data.map((item) => {
+    const status = String(item.status ?? '');
+    // queued/running 阶段尚无输出属正常，避免误判为故障。
+    const pending = status === 'queued' || status === 'running';
+    const output = item.error_message || item.log_output || (pending ? '执行中，暂无输出' : '暂无输出');
+    return <article className="server-log-row" key={String(item.id)}><div><strong>{formatServerRef(item.server_id, state)}</strong><StatusTag value={status} /></div><small>{`开始：${formatDateTime(item.started_at)} · 结束：${formatDateTime(item.finished_at)} · 耗时：${item.duration_ms ?? 0}ms`}</small>{item.error_code ? <code>{item.error_code}</code> : null}<pre>{String(output)}</pre></article>;
+  })}</div>;
 }
 
 function SectionTitle({ title, meta }: { title: string; meta: string }) {
@@ -1184,7 +1190,7 @@ function DeploymentStateList({ data, state }: { data: Entity[]; state: AppState 
             <div className="data-main">
               <Typography.Text strong>{formatServerRef(item.server_id, state)}</Typography.Text>
               <Typography.Text type="secondary">{formatReleaseContext(item, state)}</Typography.Text>
-              <Typography.Text type="secondary">{`部署 ${shortID(item.deploy_record_id)} / ${item.updated_at ?? '-'}`}</Typography.Text>
+              <Typography.Text type="secondary">{`部署 ${shortID(item.deploy_record_id)} / ${formatDateTime(item.updated_at)}`}</Typography.Text>
             </div>
           </div>
         )}
@@ -1267,7 +1273,7 @@ function ServerEditor({ servers, credentials, onDone }: { servers: Entity[]; cre
   function choose(id: string) { const item = findByID(servers, id); setSelectedID(id); form.setFieldsValue(item); setTestResult(''); }
   async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/servers/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
   async function test() { if (!selectedID) return; setTesting(true); setTestResult(''); try { const body = await apiPost<{ server: Entity; result: Entity }>(`/api/v1/servers/${selectedID}/test`, {}); setTestResult(`${body.result.status}: ${body.result.error_message ?? body.result.log_output ?? '连接成功'}`); onDone(); } catch (err) { setTestResult(err instanceof Error ? err.message : '连接测试失败'); } finally { setTesting(false); } }
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择服务器"><Select value={selectedID || undefined} placeholder="选择服务器" options={servers.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="role" label="服务器角色" rules={[{ required: true }]}><Select options={[{ label: '应用服务器', value: 'application' }, { label: '网关服务器', value: 'gateway' }]} onChange={() => form.setFieldsValue({ gateway_id: undefined })} /></Form.Item><Form.Item name="host" label="Host" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="port" label="Port"><Input type="number" min={1} /></Form.Item><Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="auth_type" label="认证方式"><Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }, { label: 'none', value: 'none' }]} /></Form.Item><Form.Item name="credential_ref" label="凭据"><Select allowClear options={credentials.map(entityOption)} /></Form.Item>{role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接，不能再配置上游网关。</Typography.Text>}<Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Space wrap><Button type="primary" htmlType="submit" loading={loading}>保存服务器</Button><Button loading={testing} onClick={() => void test()}>测试 SSH</Button></Space>{testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected.last_check_status ?? '未测试'} / {selected.last_check_at ?? '-'}</Typography.Text>}</> : <div className="form-empty">选择一台服务器开始编辑或测试。</div>}</Form>;
+  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择服务器"><Select value={selectedID || undefined} placeholder="选择服务器" options={servers.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="role" label="服务器角色" rules={[{ required: true }]}><Select options={[{ label: '应用服务器', value: 'application' }, { label: '网关服务器', value: 'gateway' }]} onChange={() => form.setFieldsValue({ gateway_id: undefined })} /></Form.Item><Form.Item name="host" label="Host" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="port" label="Port"><Input type="number" min={1} /></Form.Item><Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="auth_type" label="认证方式"><Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }, { label: 'none', value: 'none' }]} /></Form.Item><Form.Item name="credential_ref" label="凭据"><Select allowClear options={credentials.map(entityOption)} /></Form.Item>{role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接，不能再配置上游网关。</Typography.Text>}<Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Space wrap><Button type="primary" htmlType="submit" loading={loading}>保存服务器</Button><Button loading={testing} onClick={() => void test()}>测试 SSH</Button></Space>{testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected.last_check_status ?? '未测试'} / {formatDateTime(selected.last_check_at)}</Typography.Text>}</> : <div className="form-empty">选择一台服务器开始编辑或测试。</div>}</Form>;
 }
 
 function ServerGroupEditor({ groups, servers, onDone }: { groups: Entity[]; servers: Entity[]; onDone: () => void }) {
@@ -1435,6 +1441,8 @@ function EnvironmentForm({ onDone }: { onDone: (environment: Entity) => void }) 
 function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; credentials: Entity[]; onDone: (server: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState('');
   const authType = Form.useWatch('auth_type', form);
   const role = Form.useWatch('role', form);
   const gateways = servers.filter((server) => server.role === 'gateway' && server.enabled !== false);
@@ -1449,6 +1457,28 @@ function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; crede
       onDone(server);
     } finally {
       setLoading(false);
+    }
+  }
+  // 一次性连接校验，不落库；结果仅作提示，不限制创建。
+  async function testConnection() {
+    const values = form.getFieldsValue();
+    if (!values.host || !values.username) {
+      setTestResult('请先填写 Host 与 Username');
+      return;
+    }
+    setTesting(true);
+    setTestResult('');
+    try {
+      const body = await apiPost<{ result: Entity }>('/api/v1/servers/test', {
+        ...values,
+        port: Number(values.port || 22),
+      });
+      const result = body.result;
+      setTestResult(result.status === 'success' ? '连接成功' : `连接失败：${result.error_message ?? result.error_code ?? result.status}`);
+    } catch (err) {
+      setTestResult(err instanceof Error ? err.message : '连接测试失败');
+    } finally {
+      setTesting(false);
     }
   }
   return (
@@ -1485,9 +1515,15 @@ function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; crede
         <Select allowClear options={credentials.map(entityOption)} disabled={authType === 'none'} />
       </Form.Item>
       {role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接；应用服务器经它建立隧道后仍使用自己的凭据登录。</Typography.Text>}
-      <Button type="primary" htmlType="submit" loading={loading}>
-        创建服务器
-      </Button>
+      <Space wrap>
+        <Button type="primary" htmlType="submit" loading={loading}>
+          创建服务器
+        </Button>
+        <Button loading={testing} onClick={() => void testConnection()}>
+          测试连接
+        </Button>
+      </Space>
+      {testResult ? <div className="test-result">{testResult}</div> : null}
     </Form>
   );
 }
@@ -1668,8 +1704,8 @@ function UserForm({ onDone }: { onDone: (user: Entity) => void }) {
       <Form.Item name="role" label="角色" rules={[{ required: true }]}>
         <Select
           options={[
-            { label: 'employee', value: 'employee' },
-            { label: 'admin', value: 'admin' },
+            { label: '员工（employee）', value: 'employee' },
+            { label: '管理员（admin）', value: 'admin' },
           ]}
         />
       </Form.Item>
@@ -1708,7 +1744,7 @@ function UserList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
                   <Typography.Text strong>{item.display_name ?? item.username ?? item.id}</Typography.Text>
                   <StatusTag value={enabled ? 'enabled' : 'disabled'} />
                 </Space>
-                <Typography.Text type="secondary">{`${item.username ?? '-'} / ${item.role ?? '-'}`}</Typography.Text>
+                <Typography.Text type="secondary">{`${item.username ?? '-'} / ${roleLabel(item.role)}`}</Typography.Text>
               </div>
               <Button loading={busyID === item.id} onClick={() => void setEnabled(item, !enabled)}>
                 {enabled ? '禁用' : '启用'}
@@ -1854,9 +1890,10 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
   async function submit(values: Entity) {
     setLoading(true);
     try {
+      const scopes = Array.isArray(values.scopes) ? (values.scopes as string[]) : [];
       const body = await apiPost<APIKeyCreateResponse>('/api/v1/api-keys', {
         ...values,
-        scopes: values.scopes || '["release:create"]',
+        scopes: JSON.stringify(scopes.length > 0 ? scopes : ['release:create']),
       });
       setPlaintext(body.plaintext);
       form.resetFields();
@@ -1878,15 +1915,15 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ scopes: '["release:create","release:confirm"]' }}
+        initialValues={{ scopes: ['release:create', 'release:confirm'] }}
         onFinish={(values) => void submit(values)}
       >
         <Form.Item name="name" label="名称" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        {ownKey ? <Typography.Text type="secondary">该访问密钥将归属当前登录用户。</Typography.Text> : <Form.Item name="owner_user_id" label="归属用户" rules={[{ required: true }]}><Select options={users.map(entityOption)} /></Form.Item>}
-        <Form.Item name="scopes" label="Scopes JSON" rules={[{ required: true }]}>
-          <Input.TextArea rows={3} />
+        {ownKey ? <Typography.Text type="secondary">该访问密钥将归属当前登录用户。</Typography.Text> : <Form.Item name="owner_user_id" label="归属用户" rules={[{ required: true }]}><Select options={users.map(userOption)} showSearch optionFilterProp="label" /></Form.Item>}
+        <Form.Item name="scopes" label="权限范围" rules={[{ required: true, message: '请至少选择一个权限' }]}>
+          <Checkbox.Group options={API_KEY_SCOPE_OPTIONS} />
         </Form.Item>
         <Button type="primary" htmlType="submit" loading={loading}>
           创建访问密钥
@@ -1896,7 +1933,7 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
   );
 }
 
-function APIKeyList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
+function APIKeyList({ data, users, onDone }: { data: Entity[]; users: Entity[]; onDone: () => void }) {
   const [busyID, setBusyID] = useState('');
   async function setEnabled(item: Entity, enabled: boolean) {
     setBusyID(String(item.id ?? ''));
@@ -1916,6 +1953,18 @@ function APIKeyList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
       setBusyID('');
     }
   }
+  function scopeLabels(raw: Entity[string]) {
+    let scopes: unknown[] = [];
+    try {
+      const parsed = JSON.parse(String(raw ?? '[]'));
+      if (Array.isArray(parsed)) {
+        scopes = parsed;
+      }
+    } catch {
+      scopes = [];
+    }
+    return scopes.map((scope) => API_KEY_SCOPE_OPTIONS.find((option) => option.value === String(scope))?.label ?? String(scope)).join('、') || '无';
+  }
   return (
     <div className="mini-list">
       <Typography.Title level={4}>访问密钥</Typography.Title>
@@ -1923,6 +1972,8 @@ function APIKeyList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
         data={data}
         renderItem={(item) => {
           const enabled = item.enabled !== false;
+          const ownerID = scalarRef(item.owner_user_id);
+          const owner = findByID(users, ownerID);
           return (
             <div className="data-row">
               <div className="data-main">
@@ -1930,8 +1981,8 @@ function APIKeyList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
                   <Typography.Text strong>{item.name ?? item.id}</Typography.Text>
                   <StatusTag value={enabled ? 'enabled' : 'disabled'} />
                 </Space>
-                <Typography.Text type="secondary">{`${item.prefix ?? '-'} / ${item.owner_user_id ?? '-'}`}</Typography.Text>
-                <Typography.Text type="secondary">{`${item.scopes ?? '[]'}`}</Typography.Text>
+                <Typography.Text type="secondary">{`${item.prefix ?? '-'} / 归属 ${owner ? (owner.display_name ?? owner.username ?? shortID(ownerID)) : shortID(ownerID)}`}</Typography.Text>
+                <Typography.Text type="secondary">{scopeLabels(item.scopes)}</Typography.Text>
               </div>
               <Space>
                 <Button loading={busyID === item.id} onClick={() => void setEnabled(item, !enabled)}>
@@ -2032,7 +2083,7 @@ function formatEventContext(item: Entity, state: AppState) {
     parts.push(`部署 ${shortID(item.deploy_record_id)}`);
   }
   if (item.created_at) {
-    parts.push(String(item.created_at));
+    parts.push(formatDateTime(item.created_at));
   }
   return parts.length > 0 ? parts.join(' / ') : '-';
 }
@@ -2104,6 +2155,55 @@ function selectLabel(item: Entity, nameField: string) {
     return formatTarget(item);
   }
   return String(item[nameField] ?? item.name ?? item.id);
+}
+
+// 用户角色中文映射，便于理解
+function roleLabel(role: Entity[string]) {
+  switch (String(role ?? '')) {
+    case 'admin':
+      return '管理员';
+    case 'employee':
+      return '员工';
+    default:
+      return String(role ?? '-');
+  }
+}
+
+// 用户下拉选项：优先显示名，回退到用户名
+function userOption(item: Entity) {
+  return { label: String(item.display_name ?? item.username ?? item.id), value: String(item.id) };
+}
+
+// 访问密钥 scope 选项：须与后端 allowedAPIKeyScopes（internal/httpapi/inventory.go）保持同步
+const API_KEY_SCOPE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: '读取资源清单（inventory:read）', value: 'inventory:read' },
+  { label: '读取发布（release:read）', value: 'release:read' },
+  { label: '创建发布（release:create）', value: 'release:create' },
+  { label: '确认发布（release:confirm）', value: 'release:confirm' },
+  { label: '回滚发布（release:rollback）', value: 'release:rollback' },
+  { label: '读取部署（deploy:read）', value: 'deploy:read' },
+  { label: '管理写（admin:write）', value: 'admin:write' },
+];
+
+// 上海时区时间格式化（存储/传输为 UTC，展示本地化）
+function formatDateTime(value: Entity[string]) {
+  if (!value) {
+    return '-';
+  }
+  const time = new Date(String(value)).getTime();
+  if (Number.isNaN(time)) {
+    return String(value);
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(new Date(time));
 }
 
 async function apiGet<T>(path: string): Promise<T> {

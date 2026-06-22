@@ -483,7 +483,20 @@ func listUsers(store repository.Store) http.HandlerFunc {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 			return
 		}
-		writeData(w, r, http.StatusOK, items)
+		// 管理员返回完整字段（管理界面需要 role/enabled）；普通用户仅返回用户目录，屏蔽 role/enabled 等敏感字段。
+		if user, ok := currentSessionUser(r); ok && user.Role == "admin" {
+			writeData(w, r, http.StatusOK, items)
+			return
+		}
+		directory := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			directory = append(directory, map[string]any{
+				"id":           item.ID,
+				"username":     item.Username,
+				"display_name": item.DisplayName,
+			})
+		}
+		writeData(w, r, http.StatusOK, directory)
 	}
 }
 

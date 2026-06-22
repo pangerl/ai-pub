@@ -42,3 +42,20 @@ func (s InfrastructureService) TestServer(ctx context.Context, id string) (domai
 	updated, err := s.store.GetServer(ctx, id)
 	return updated, result, err
 }
+
+// TestServerConfig 对未落库的服务器配置做一次性连接校验，不更新 last_check 状态。
+func (s InfrastructureService) TestServerConfig(ctx context.Context, server domain.Server) (repository.ServerResult, error) {
+	if server.AuthType != "private_key" && server.AuthType != "password" {
+		return repository.ServerResult{}, errors.New("server must use password or private_key authentication")
+	}
+	var gateway *domain.Server
+	if server.GatewayID != "" {
+		item, err := s.store.GetServer(ctx, server.GatewayID)
+		if err != nil {
+			return repository.ServerResult{}, errors.New("gateway server is not available")
+		}
+		gateway = &item
+	}
+	result := (executor.SSH{Credentials: s.credentials}).Check(ctx, server, gateway)
+	return result, nil
+}
