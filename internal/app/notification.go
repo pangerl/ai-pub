@@ -86,6 +86,11 @@ func (s NotificationService) PatchConfig(ctx context.Context, id string, input P
 	return s.store.UpdateNotificationConfig(ctx, id, patch)
 }
 
+// DeleteConfig 删除通知配置；历史投递记录保留 config_id 悬空引用以保留审计。
+func (s NotificationService) DeleteConfig(ctx context.Context, id string) error {
+	return s.store.DeleteNotificationConfig(ctx, id)
+}
+
 func (s NotificationService) Test(ctx context.Context, configID string) (domain.NotificationDelivery, error) {
 	config, err := s.decryptConfig(ctx, configID)
 	if err != nil {

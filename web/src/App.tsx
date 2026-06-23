@@ -3,6 +3,7 @@ import {
   Button,
   Checkbox,
   ConfigProvider,
+  Drawer,
   Form,
   Input,
   Popconfirm,
@@ -30,6 +31,7 @@ type Entity = Record<string, ScalarValue | string[]> & {
   status?: ScalarValue;
   display_name?: ScalarValue;
   version?: ScalarValue;
+  _kind?: string;
 };
 
 type ReleaseResponse = {
@@ -191,6 +193,32 @@ export function App() {
   const [releaseFilterNow, setReleaseFilterNow] = useState(0);
   const [infrastructureView, setInfrastructureView] = useState<InfrastructureView>('overview');
   const [managementView, setManagementView] = useState<ManagementView>('overview');
+  // 配置页编辑抽屉：统一用一个 selectedEditor 记录正在编辑的实体（带 _kind 标记）。
+  const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
+  function openEditor(item: Entity, kind: string) {
+    setEditingEntity({ ...item, _kind: kind });
+  }
+  function closeEditor() {
+    setEditingEntity(null);
+  }
+  // 行内启用/禁用：调用 PATCH { enabled }。
+  async function toggleEntityEnabled(item: Entity, kind: string, enabled: boolean) {
+    try {
+      await apiPatch<Entity>(`${entityEndpoint({ ...item, _kind: kind })}/${item.id}`, { enabled });
+      await refreshAll();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '操作失败');
+    }
+  }
+  // 行内冻结/解冻环境：调用 PATCH { release_frozen }。冻结是真正生效的发布保护。
+  async function toggleEnvironmentFrozen(item: Entity, frozen: boolean) {
+    try {
+      await apiPatch<Entity>(`/api/v1/environments/${item.id}`, { release_frozen: frozen });
+      await refreshAll();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '操作失败');
+    }
+  }
   const [currentUser, setCurrentUser] = useState<Entity | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const activeReleaseID = activeRelease?.id as string | undefined;
@@ -881,24 +909,29 @@ export function App() {
                   </> : null}
                   {infrastructureView === 'application' ? <>
                     <InfrastructureSectionHeading eyebrow="APPLICATION" title="应用与版本" description="这是发布内容的来源。先创建项目和服务，再为服务登记可部署版本。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="已注册对象" meta="INVENTORY" /><div className="infrastructure-list-stack"><EntityList title="项目" data={state.projects} fields={['slug', 'description']} /><EntityList title="服务" data={state.services} fields={['slug', 'project_id']} /><EntityList title="当前服务版本" data={state.versions} fields={['version', 'source']} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="逐步创建" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 项目</h3><ProjectForm onDone={() => void refreshAll()} /></div><div><h3>2. 服务</h3><ServiceForm projects={state.projects} onDone={(service) => refreshWithSelection({ serviceID: String(service.id ?? ''), versionID: '', targetID: '' })} /></div><div><h3>3. 版本</h3><VersionForm services={state.services} onDone={(version) => refreshWithSelection({ serviceID: String(version.service_id ?? ''), versionID: String(version.id ?? '') })} /></div></div></section></div>
+                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="已注册对象" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="项目" data={state.projects} nameField="name" subFields={['slug', 'description']} onOpen={(item) => openEditor(item, 'project')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'project', enabled)} /><EditableInventoryList title="服务" data={state.services} nameField="name" subFields={['slug']} onOpen={(item) => openEditor(item, 'service')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'service', enabled)} /><EntityList title="当前服务版本（不可编辑）" data={state.versions} fields={['version', 'source']} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="逐步创建" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 项目</h3><ProjectForm onDone={() => void refreshAll()} /></div><div><h3>2. 服务</h3><ServiceForm projects={state.projects} onDone={(service) => refreshWithSelection({ serviceID: String(service.id ?? ''), versionID: '', targetID: '' })} /></div><div><h3>3. 版本</h3><VersionForm services={state.services} onDone={(version) => refreshWithSelection({ serviceID: String(version.service_id ?? ''), versionID: String(version.id ?? '') })} /></div></div></section></div>
                     <section className="surface service-detail"><SectionTitle title="服务部署视图" meta="SERVICE" /><LabeledSelect label="服务" value={selected.service?.id} options={state.services} nameField="name" onChange={(value) => refreshWithSelection({ serviceID: value, versionID: '', targetID: '' })} /><ServiceDetail service={selected.service} versions={state.versions} targets={state.targets} environments={state.environments} states={state.states} /></section>
                   </> : null}
                   {infrastructureView === 'runtime' ? <>
                     <InfrastructureSectionHeading eyebrow="RUNTIME" title="运行环境" description="管理发布到哪里，以及哪些服务器作为一个批次共同执行。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EntityList title="环境" data={state.environments} fields={['slug', 'is_production', 'release_frozen']} /><EntityList title="服务器" data={state.servers} fields={['host', 'role', 'username', 'last_check_status']} /><ServerGroupList data={state.serverGroups} state={state} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm servers={state.servers} credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
-                    <section className="surface infrastructure-maintenance"><SectionTitle title="维护与发布保护" meta="MANAGE" /><div className="infrastructure-maintenance-grid"><div><h3>环境</h3><EnvironmentEditor environments={state.environments} onDone={() => void refreshAll()} /></div><div><h3>服务器与 SSH</h3><ServerEditor servers={state.servers} credentials={state.credentials} onDone={() => void refreshAll()} /></div><div><h3>服务器组</h3><ServerGroupEditor groups={state.serverGroups} servers={state.servers} onDone={() => void refreshAll()} /></div></div></section>
+                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="环境" data={state.environments} nameField="name" subFields={['slug', 'is_production']} frozenField="release_frozen" onOpen={(item) => openEditor(item, 'environment')} onToggleFrozen={(item, frozen) => void toggleEnvironmentFrozen(item, frozen)} /><EditableInventoryList title="服务器" data={state.servers} nameField="name" subFields={['host', 'role', 'username', 'last_check_status']} onOpen={(item) => openEditor(item, 'server')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server', enabled)} /><EditableInventoryList title="服务器组" data={state.serverGroups} nameField="name" subFields={['description']} onOpen={(item) => openEditor(item, 'server-group')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server-group', enabled)} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm servers={state.servers} credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
                   </> : null}
                   {infrastructureView === 'targeting' ? <>
                     <InfrastructureSectionHeading eyebrow="DEPLOYMENT TARGET" title="部署连接" description="把服务、环境与服务器或服务器组组合为发布时可选择的部署目标。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="现有部署目标" meta="INVENTORY" /><DeploymentTargetList data={state.targets} state={state} /><div className="targeting-note"><strong>当前选择</strong><span>{selected.service?.name ?? '未选择服务'} / {selected.environment?.name ?? '未选择环境'}</span></div></section><section className="surface infrastructure-actions"><SectionTitle title="新建部署目标" meta="CREATE" /><DeploymentTargetForm services={state.services} environments={state.environments} servers={state.servers} serverGroups={state.serverGroups} selectedServiceID={selection.serviceID} selectedEnvironmentID={selection.environmentID} preferredTargetRef={manualTargetRef} onDone={(target) => refreshWithSelection({ serviceID: String(target.service_id ?? ''), environmentID: String(target.environment_id ?? ''), targetID: String(target.id ?? '') })} /></section></div>
-                    <section className="surface infrastructure-maintenance"><SectionTitle title="维护部署目标" meta="MANAGE" /><DeploymentTargetEditor targets={state.targets} servers={state.servers} serverGroups={state.serverGroups} onDone={() => void refreshAll()} /></section>
+                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="现有部署目标" meta="INVENTORY" /><DeploymentTargetList data={state.targets} state={state} onOpen={(item) => openEditor(item, 'deployment-target')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'deployment-target', enabled)} /><div className="targeting-note"><strong>当前选择</strong><span>{selected.service?.name ?? '未选择服务'} / {selected.environment?.name ?? '未选择环境'}</span></div></section><section className="surface infrastructure-actions"><SectionTitle title="新建部署目标" meta="CREATE" /><DeploymentTargetForm services={state.services} environments={state.environments} servers={state.servers} serverGroups={state.serverGroups} selectedServiceID={selection.serviceID} selectedEnvironmentID={selection.environmentID} preferredTargetRef={manualTargetRef} onDone={(target) => refreshWithSelection({ serviceID: String(target.service_id ?? ''), environmentID: String(target.environment_id ?? ''), targetID: String(target.id ?? '') })} /></section></div>
                   </> : null}
                   {infrastructureView === 'state' ? <>
                     <InfrastructureSectionHeading eyebrow="RUNTIME STATE" title="当前部署状态" description="查看每台服务器最后一次成功部署后的版本状态；它是运行视图，不是配置入口。" />
                     <section className="surface infrastructure-state"><DeploymentStateList data={state.states} state={state} /></section>
                   </> : null}
                 </div>
+                {/* 配置页编辑抽屉：根据 editingEntity._kind 渲染对应表单 */}
+                <ProjectEditorDrawer open={!!editingEntity && editingEntity._kind === 'project'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} />
+                <ServiceEditorDrawer open={!!editingEntity && editingEntity._kind === 'service'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} />
+                <EnvironmentEditorDrawer open={!!editingEntity && editingEntity._kind === 'environment'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} />
+                <ServerEditorDrawer open={!!editingEntity && editingEntity._kind === 'server'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} credentials={state.credentials} />
+                <ServerGroupEditorDrawer open={!!editingEntity && editingEntity._kind === 'server-group'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} />
+                <DeploymentTargetEditorDrawer open={!!editingEntity && editingEntity._kind === 'deployment-target'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} serverGroups={state.serverGroups} />
               </section>
             </>
           ) : null}
@@ -912,8 +945,8 @@ export function App() {
                 {managementView === 'overview' ? <><section className="surface management-summary"><SectionTitle title="管理状态" meta="CONTROL PLANE" /><div className="management-stat-grid"><ManagementStat label="可用用户" value={state.users.filter((item) => item.enabled !== false).length} note="可登录并参与发布" onClick={() => setManagementView('users')} /><ManagementStat label="启用访问密钥" value={state.apiKeys.filter((item) => item.enabled !== false).length} note="供 CI/CD 和脚本调用" onClick={() => setManagementView('access')} /><ManagementStat label="启用通知" value={state.notificationConfigs.filter((item) => item.enabled !== false).length} note="企业微信机器人" onClick={() => setManagementView('notifications')} /><ManagementStat label="投递异常" value={state.notificationDeliveries.filter((item) => item.status !== 'sent').length} note="查看最近失败原因" onClick={() => setManagementView('notifications')} /></div></section><section className="surface management-guide"><span className="mono-label">日常管理</span><h2>只在需要时打开对应的管理面板。</h2><div><button onClick={() => setManagementView('users')}>新增发布用户 <span>用户与权限 →</span></button><button onClick={() => setManagementView('access')}>创建 CI/CD 访问密钥 <span>集成访问密钥 →</span></button><button onClick={() => setManagementView('notifications')}>测试通知机器人 <span>通知与投递 →</span></button></div></section></> : null}
                 {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建用户" meta="CREATE" /><UserForm onDone={(user) => refreshWithSelection({ userID: String(user.id ?? '') })} /></section></div></> : null}
                 {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="创建集成访问密钥" meta="CREATE" /><APIKeyForm users={state.users} onDone={() => void refreshAll()} /></section></div></> : null}
-                {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="新增通知配置" meta="CREATE" /><NotificationForm onDone={() => void refreshAll()} /></section></div><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><EntityList title="最近投递" data={state.notificationDeliveries} fields={['event_type', 'status', 'last_error']} /></section></> : null}
-                {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据只供服务器 SSH 连接引用；Secret 不会在创建后再次展示。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><EntityList title="凭据" data={state.credentials} fields={['type', 'enabled', 'description']} /></section><section className="surface management-actions"><SectionTitle title="保存连接凭据" meta="CREATE" /><CredentialForm onDone={() => void refreshAll()} /></section></div></> : null}
+                {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="新增通知配置" meta="CREATE" /><NotificationForm onDone={() => void refreshAll()} /></section></div><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><NotificationDeliveryList data={state.notificationDeliveries} configs={state.notificationConfigs} /></section></> : null}
+                {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据只供服务器 SSH 连接引用；Secret 不会在创建后再次展示。" /><div className="management-columns"><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><CredentialList data={state.credentials} servers={state.servers} onDone={() => void refreshAll()} /></section><section className="surface management-actions"><SectionTitle title="保存连接凭据" meta="CREATE" /><CredentialForm onDone={() => void refreshAll()} /></section></div></> : null}
               </div>
             </section>
           </> : null}
@@ -1159,25 +1192,6 @@ function EntityList({ title, data, fields }: { title: string; data: Entity[]; fi
   );
 }
 
-function ServerGroupList({ data, state }: { data: Entity[]; state: AppState }) {
-  return (
-    <div className="mini-list">
-      <Typography.Title level={4}>服务器组</Typography.Title>
-      <DataList
-        data={data}
-        renderItem={(item) => (
-          <div className="data-row compact">
-            <div className="data-main">
-              <Typography.Text strong>{namedRef(item, item.id, 'name')}</Typography.Text>
-              <Typography.Text type="secondary">{formatServerMembers(item.server_ids, state)}</Typography.Text>
-              {item.description ? <Typography.Text type="secondary">{item.description}</Typography.Text> : null}
-            </div>
-          </div>
-        )}
-      />
-    </div>
-  );
-}
 
 function DeploymentStateList({ data, state }: { data: Entity[]; state: AppState }) {
   return (
@@ -1199,26 +1213,30 @@ function DeploymentStateList({ data, state }: { data: Entity[]; state: AppState 
   );
 }
 
-function DeploymentTargetList({ data, state }: { data: Entity[]; state: AppState }) {
+function DeploymentTargetList({ data, state, onOpen, onToggleEnabled }: { data: Entity[]; state: AppState; onOpen?: (item: Entity) => void; onToggleEnabled?: (item: Entity, enabled: boolean) => void }) {
   return (
     <div className="mini-list">
       <Typography.Title level={4}>部署目标</Typography.Title>
       <DataList
         data={data}
-        renderItem={(item) => (
-          <div className="data-row compact">
-            <div className="data-main">
-              <Typography.Text strong>{formatTarget(item, targetRefFor(item, state))}</Typography.Text>
-              <Typography.Text type="secondary">
-                {[
-                  namedRef(findByID(state.services, item.service_id), item.service_id, 'name'),
-                  namedRef(findByID(state.environments, item.environment_id), item.environment_id, 'name'),
-                ].join(' / ')}
-              </Typography.Text>
-              <Typography.Text type="secondary">{`超时 ${item.timeout_seconds ?? '-'} 秒 / ${item.enabled === false ? 'disabled' : 'enabled'}`}</Typography.Text>
+        renderItem={(item) => {
+          const enabled = item.enabled !== false;
+          return (
+            <div className="data-row compact">
+              <div className="data-main" onClick={onOpen ? () => onOpen(item) : undefined} style={onOpen ? { cursor: 'pointer' } : undefined}>
+                <Typography.Text strong>{formatTarget(item, targetRefFor(item, state))}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {[
+                    namedRef(findByID(state.services, item.service_id), item.service_id, 'name'),
+                    namedRef(findByID(state.environments, item.environment_id), item.environment_id, 'name'),
+                  ].join(' / ')}
+                </Typography.Text>
+                <Typography.Text type="secondary">{`超时 ${item.timeout_seconds ?? '-'} 秒`}</Typography.Text>
+              </div>
+              {onToggleEnabled ? <Button size="small" onClick={() => onToggleEnabled(item, !enabled)}>{enabled ? '禁用' : '启用'}</Button> : null}
             </div>
-          </div>
-        )}
+          );
+        }}
       />
     </div>
   );
@@ -1251,51 +1269,257 @@ function maskArtifactURL(value: Entity[string]) {
   }
 }
 
-function EnvironmentEditor({ environments, onDone }: { environments: Entity[]; onDone: () => void }) {
-  const [form] = Form.useForm();
-  const [selectedID, setSelectedID] = useState('');
-  const [loading, setLoading] = useState(false);
-  const selected = findByID(environments, selectedID);
-  function choose(id: string) { const item = findByID(environments, id); setSelectedID(id); form.setFieldsValue(item); }
-  async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/environments/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择环境"><Select value={selectedID || undefined} placeholder="选择环境" options={environments.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="slug" label="Slug" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="is_production" valuePropName="checked"><Checkbox>生产环境（固定要求管理员确认）</Checkbox></Form.Item><Form.Item name="release_frozen" valuePropName="checked"><Checkbox>冻结此环境的发布</Checkbox></Form.Item><Typography.Text type="secondary">冻结会阻断新建和确认；已入队任务暂停领取，运行中的任务继续。</Typography.Text><Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Button type="primary" htmlType="submit" loading={loading}>保存环境</Button></> : <div className="form-empty">选择一项开始编辑。</div>}</Form>;
+// 通用可编辑列表：行可点击打开编辑抽屉，行内含启用/禁用开关；环境额外支持行内冻结/解冻。
+function EditableInventoryList({ title, data, nameField, subFields, onOpen, onToggleEnabled, frozenField, onToggleFrozen }: { title: string; data: Entity[]; nameField: string; subFields: string[]; onOpen: (item: Entity) => void; onToggleEnabled?: (item: Entity, enabled: boolean) => void; frozenField?: string; onToggleFrozen?: (item: Entity, frozen: boolean) => void }) {
+  return (
+    <div className="mini-list">
+      <Typography.Title level={4}>{title}</Typography.Title>
+      <DataList
+        data={data}
+        renderItem={(item) => {
+          const enabled = item.enabled !== false;
+          const frozen = frozenField ? item[frozenField] === true : false;
+          return (
+            <div className="data-row">
+              <div className="data-main" role="button" onClick={() => onOpen(item)} style={{ cursor: 'pointer' }}>
+                <Space>
+                  <Typography.Text strong>{selectLabel(item, nameField)}</Typography.Text>
+                  {item.enabled !== undefined ? <StatusTag value={enabled ? 'enabled' : 'disabled'} /> : null}
+                  {frozenField ? <StatusTag value="frozen" /> : null}
+                </Space>
+                <Typography.Text type="secondary">{subFields.map((field) => formatEntityValue(item[field])).join(' / ')}</Typography.Text>
+              </div>
+              <Space size="small">
+                {onToggleFrozen && frozenField ? (
+                  <Button size="small" onClick={() => onToggleFrozen(item, !frozen)}>
+                    {frozen ? '解冻' : '冻结'}
+                  </Button>
+                ) : null}
+                {onToggleEnabled && item.enabled !== undefined ? (
+                  <Button size="small" onClick={() => onToggleEnabled(item, !enabled)}>
+                    {enabled ? '禁用' : '启用'}
+                  </Button>
+                ) : null}
+              </Space>
+            </div>
+          );
+        }}
+      />
+    </div>
+  );
 }
 
-function ServerEditor({ servers, credentials, onDone }: { servers: Entity[]; credentials: Entity[]; onDone: () => void }) {
+// 抽屉表单基座：open 时回填字段，保存调 PATCH。
+function EntityDrawer({ open, title, selected, onClose, onDone, fields }: { open: boolean; title: string; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; fields: (form: ReturnType<typeof Form.useForm>[0]) => ReactNode }) {
   const [form] = Form.useForm();
-  const [selectedID, setSelectedID] = useState('');
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (open && selected) {
+      form.setFieldsValue(selected);
+    }
+  }, [open, selected, form]);
+  async function submit() {
+    if (!selected) return;
+    let values: Entity;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    setLoading(true);
+    try {
+      await apiPatch<Entity>(`${entityEndpoint(selected)}/${selected.id}`, values);
+      onDone(String(selected.id ?? ''));
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Drawer title={title} open={open} onClose={onClose} width={480} footer={null} destroyOnClose>
+      <Form form={form} layout="vertical">
+        {fields(form)}
+        <Space style={{ marginTop: 8 }}>
+          <Button type="primary" loading={loading} onClick={() => void submit()}>保存</Button>
+          <Button onClick={onClose}>取消</Button>
+        </Space>
+      </Form>
+    </Drawer>
+  );
+}
+
+// 由实体推断 PATCH 端点；selected 需带 _kind 标记（由列表传入）。
+function entityEndpoint(selected: Entity): string {
+  const kind = String(selected._kind ?? '');
+  switch (kind) {
+    case 'project': return '/api/v1/projects';
+    case 'service': return '/api/v1/services';
+    case 'environment': return '/api/v1/environments';
+    case 'server': return '/api/v1/servers';
+    case 'server-group': return '/api/v1/server-groups';
+    case 'deployment-target': return '/api/v1/deployment-targets';
+    default: return '/api/v1';
+  }
+}
+
+function ProjectEditorDrawer({ open, selected, onClose, onDone }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void }) {
+  return (
+    <EntityDrawer open={open} title="编辑项目" selected={selected} onClose={onClose} onDone={onDone} fields={() => <>
+      <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="slug" label="Slug" rules={[{ required: true }]}><Input /></Form.Item>
+      <Typography.Text type="secondary">修改 Slug 可能影响已配置的 CI 引用，请谨慎。</Typography.Text>
+      <Form.Item name="description" label="描述"><Input /></Form.Item>
+      <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+    </>} />
+  );
+}
+
+function ServiceEditorDrawer({ open, selected, onClose, onDone }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void }) {
+  return (
+    <EntityDrawer open={open} title="编辑服务" selected={selected} onClose={onClose} onDone={onDone} fields={() => <>
+      <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="slug" label="Slug" rules={[{ required: true }]}><Input /></Form.Item>
+      <Typography.Text type="secondary">修改 Slug 可能影响已配置的 CI 引用，请谨慎。服务归属项目创建时确定，不支持迁移。</Typography.Text>
+      <Form.Item name="description" label="描述"><Input /></Form.Item>
+      <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+    </>} />
+  );
+}
+
+function EnvironmentEditorDrawer({ open, selected, onClose, onDone }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void }) {
+  return (
+    <EntityDrawer open={open} title="编辑环境" selected={selected} onClose={onClose} onDone={onDone} fields={() => <>
+      <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="slug" label="Slug" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="is_production" valuePropName="checked"><Checkbox>生产环境（固定要求管理员确认）</Checkbox></Form.Item>
+      <Form.Item name="release_frozen" valuePropName="checked"><Checkbox>冻结此环境的发布</Checkbox></Form.Item>
+      <Typography.Text type="secondary">冻结会阻断新建和确认；已入队任务暂停领取，运行中的任务继续。</Typography.Text>
+    </>} />
+  );
+}
+
+function ServerEditorDrawer({ open, selected, onClose, onDone, servers, credentials }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; servers: Entity[]; credentials: Entity[] }) {
+  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
-  const selected = findByID(servers, selectedID);
   const role = Form.useWatch('role', form);
+  const selectedID = String(selected?.id ?? '');
   const gateways = servers.filter((server) => server.role === 'gateway' && server.enabled !== false && String(server.id) !== selectedID);
-  function choose(id: string) { const item = findByID(servers, id); setSelectedID(id); form.setFieldsValue(item); setTestResult(''); }
-  async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/servers/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
-  async function test() { if (!selectedID) return; setTesting(true); setTestResult(''); try { const body = await apiPost<{ server: Entity; result: Entity }>(`/api/v1/servers/${selectedID}/test`, {}); setTestResult(`${body.result.status}: ${body.result.error_message ?? body.result.log_output ?? '连接成功'}`); onDone(); } catch (err) { setTestResult(err instanceof Error ? err.message : '连接测试失败'); } finally { setTesting(false); } }
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择服务器"><Select value={selectedID || undefined} placeholder="选择服务器" options={servers.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="role" label="服务器角色" rules={[{ required: true }]}><Select options={[{ label: '应用服务器', value: 'application' }, { label: '网关服务器', value: 'gateway' }]} onChange={() => form.setFieldsValue({ gateway_id: undefined })} /></Form.Item><Form.Item name="host" label="Host" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="port" label="Port"><Input type="number" min={1} /></Form.Item><Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="auth_type" label="认证方式"><Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }, { label: 'none', value: 'none' }]} /></Form.Item><Form.Item name="credential_ref" label="凭据"><Select allowClear options={credentials.map(entityOption)} /></Form.Item>{role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接，不能再配置上游网关。</Typography.Text>}<Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Space wrap><Button type="primary" htmlType="submit" loading={loading}>保存服务器</Button><Button loading={testing} onClick={() => void test()}>测试 SSH</Button></Space>{testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected.last_check_status ?? '未测试'} / {formatDateTime(selected.last_check_at)}</Typography.Text>}</> : <div className="form-empty">选择一台服务器开始编辑或测试。</div>}</Form>;
+  useEffect(() => {
+    if (open && selected) {
+      form.setFieldsValue(selected);
+      setTestResult('');
+    }
+  }, [open, selected, form]);
+  async function submit() {
+    if (!selected) return;
+    let values: Entity;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    setLoading(true);
+    try {
+      await apiPatch<Entity>(`/api/v1/servers/${selected.id}`, values);
+      onDone(selectedID);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function test() {
+    if (!selectedID) return;
+    setTesting(true);
+    setTestResult('');
+    try {
+      const body = await apiPost<{ result: Entity }>(`/api/v1/servers/${selectedID}/test`, {});
+      const result = body.result;
+      setTestResult(result.status === 'success' ? '连接成功' : `连接失败：${result.error_message ?? result.error_code ?? result.status}`);
+      onDone(selectedID);
+    } catch (err) {
+      setTestResult(err instanceof Error ? err.message : '连接测试失败');
+    } finally {
+      setTesting(false);
+    }
+  }
+  return (
+    <Drawer title="编辑服务器" open={open} onClose={onClose} width={480} footer={null} destroyOnClose>
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name="role" label="服务器角色" rules={[{ required: true }]}><Select options={[{ label: '应用服务器', value: 'application' }, { label: '网关服务器', value: 'gateway' }]} onChange={() => form.setFieldsValue({ gateway_id: undefined })} /></Form.Item>
+        <Form.Item name="host" label="Host" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name="port" label="Port"><Input type="number" min={1} /></Form.Item>
+        <Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name="auth_type" label="认证方式"><Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }, { label: 'none', value: 'none' }]} /></Form.Item>
+        <Form.Item name="credential_ref" label="凭据"><Select allowClear options={credentials.map(userOption)} /></Form.Item>
+        {role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接，不能再配置上游网关。</Typography.Text>}
+        <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+        <Space wrap>
+          <Button type="primary" loading={loading} onClick={() => void submit()}>保存</Button>
+          <Button loading={testing} onClick={() => void test()}>测试 SSH</Button>
+          <Button onClick={onClose}>取消</Button>
+        </Space>
+        {testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected?.last_check_status ?? '未测试'} / {formatDateTime(selected?.last_check_at)}</Typography.Text>}
+      </Form>
+    </Drawer>
+  );
 }
 
-function ServerGroupEditor({ groups, servers, onDone }: { groups: Entity[]; servers: Entity[]; onDone: () => void }) {
-  const [form] = Form.useForm();
-  const [selectedID, setSelectedID] = useState('');
-  const [loading, setLoading] = useState(false);
-  const selected = findByID(groups, selectedID);
-  function choose(id: string) { const item = findByID(groups, id); setSelectedID(id); form.setFieldsValue(item); }
-  async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/server-groups/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择服务器组"><Select value={selectedID || undefined} placeholder="选择服务器组" options={groups.map(entityOption)} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="description" label="描述"><Input /></Form.Item><Form.Item name="server_ids" label="成员服务器" rules={[{ required: true }]}><Select mode="multiple" options={servers.map(entityOption)} /></Form.Item><Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Button type="primary" htmlType="submit" loading={loading}>保存服务器组</Button></> : <div className="form-empty">选择一项开始编辑。</div>}</Form>;
+function ServerGroupEditorDrawer({ open, selected, onClose, onDone, servers }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; servers: Entity[] }) {
+  return (
+    <EntityDrawer open={open} title="编辑服务器组" selected={selected} onClose={onClose} onDone={onDone} fields={() => <>
+      <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="description" label="描述"><Input /></Form.Item>
+      <Form.Item name="server_ids" label="成员服务器" rules={[{ required: true }]}><Select mode="multiple" options={servers.map(entityOption)} /></Form.Item>
+      <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+    </>} />
+  );
 }
 
-function DeploymentTargetEditor({ targets, servers, serverGroups, onDone }: { targets: Entity[]; servers: Entity[]; serverGroups: Entity[]; onDone: () => void }) {
+function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers, serverGroups }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; servers: Entity[]; serverGroups: Entity[] }) {
   const [form] = Form.useForm();
-  const [selectedID, setSelectedID] = useState('');
-  const [loading, setLoading] = useState(false);
-  const selected = findByID(targets, selectedID);
   const targetType = Form.useWatch('target_type', form) as string | undefined;
-  function choose(id: string) { const item = findByID(targets, id); setSelectedID(id); form.setFieldsValue(item); }
-  async function submit(values: Entity) { if (!selectedID) return; setLoading(true); try { await apiPatch<Entity>(`/api/v1/deployment-targets/${selectedID}`, values); onDone(); } finally { setLoading(false); } }
+  useEffect(() => {
+    if (open && selected) {
+      form.setFieldsValue(selected);
+    }
+  }, [open, selected, form]);
   const targetOptions = targetType === 'server_group' ? serverGroups : servers;
-  return <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item label="选择部署目标"><Select value={selectedID || undefined} placeholder="选择部署目标" options={targets.map((item) => ({ label: String(item.id), value: String(item.id) }))} onChange={choose} /></Form.Item>{selected ? <><Form.Item name="target_type" label="目标类型"><Select options={[{ label: '服务器', value: 'server' }, { label: '服务器组', value: 'server_group' }]} /></Form.Item><Form.Item name="target_ref_id" label="运行目标"><Select options={targetOptions.map(entityOption)} /></Form.Item><Form.Item name="executor_type" label="执行器"><Select options={[{ label: 'mock', value: 'mock' }, { label: 'ssh', value: 'ssh' }]} /></Form.Item><Form.Item name="script_path" label="Script Path"><Input /></Form.Item><Form.Item name="working_dir" label="Working Dir"><Input /></Form.Item><Form.Item name="env_vars" label="环境变量 JSON"><Input.TextArea rows={3} /></Form.Item><Form.Item name="timeout_seconds" label="超时秒数"><Input type="number" min={1} /></Form.Item><Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item><Button type="primary" htmlType="submit" loading={loading}>保存部署目标</Button></> : <div className="form-empty">选择一项开始编辑。</div>}</Form>;
+  async function submit() {
+    if (!selected) return;
+    let values: Entity;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    try {
+      await apiPatch<Entity>(`/api/v1/deployment-targets/${selected.id}`, values);
+      onDone(String(selected.id ?? ''));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败');
+    }
+  }
+  return (
+    <Drawer title="编辑部署目标" open={open} onClose={onClose} width={520} footer={null} destroyOnClose>
+      <Form form={form} layout="vertical">
+        <Form.Item name="target_type" label="目标类型"><Select options={[{ label: '服务器', value: 'server' }, { label: '服务器组', value: 'server_group' }]} /></Form.Item>
+        <Form.Item name="target_ref_id" label="运行目标"><Select options={targetOptions.map(entityOption)} /></Form.Item>
+        <Form.Item name="executor_type" label="执行器"><Select options={[{ label: 'mock', value: 'mock' }, { label: 'ssh', value: 'ssh' }]} /></Form.Item>
+        <Form.Item name="script_path" label="Script Path"><Input /></Form.Item>
+        <Form.Item name="working_dir" label="Working Dir"><Input /></Form.Item>
+        <Form.Item name="env_vars" label="环境变量 JSON"><Input.TextArea rows={3} /></Form.Item>
+        <Form.Item name="timeout_seconds" label="超时秒数"><Input type="number" min={1} /></Form.Item>
+        <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+        <Space>
+          <Button type="primary" onClick={() => void submit()}>保存</Button>
+          <Button onClick={onClose}>取消</Button>
+        </Space>
+      </Form>
+    </Drawer>
+  );
 }
 
 function ProjectForm({ onDone }: { onDone: () => void }) {
@@ -1795,6 +2019,10 @@ function NotificationForm({ onDone }: { onDone: () => void }) {
 function NotificationList({ data, onTest }: { data: Entity[]; onTest: () => void }) {
   const [testingID, setTestingID] = useState('');
   const [busyID, setBusyID] = useState('');
+  const [editingID, setEditingID] = useState('');
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const editing = findByID(data, editingID);
   async function testConfig(id: string) {
     setTestingID(id);
     try {
@@ -1815,6 +2043,45 @@ function NotificationList({ data, onTest }: { data: Entity[]; onTest: () => void
       setBusyID('');
     }
   }
+  async function deleteConfig(item: Entity) {
+    setBusyID(String(item.id ?? ''));
+    try {
+      await apiDelete<Entity>(`/api/v1/notification-configs/${item.id}`);
+      onTest();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setBusyID('');
+    }
+  }
+  function openEdit(item: Entity) {
+    setEditingID(String(item.id ?? ''));
+    form.setFieldsValue({ name: item.name, webhook_url: '', enabled: item.enabled !== false });
+  }
+  async function saveEdit() {
+    if (!editingID) return;
+    let values: Entity;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    setSaving(true);
+    try {
+      // webhook_url 留空表示不改，只更新名称与启用状态
+      const patch: Entity = { name: values.name, enabled: values.enabled };
+      if (values.webhook_url) {
+        patch.webhook_url = values.webhook_url;
+      }
+      await apiPatch<Entity>(`/api/v1/notification-configs/${editingID}`, patch);
+      setEditingID('');
+      onTest();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <div className="mini-list">
       <Typography.Title level={4}>通知配置</Typography.Title>
@@ -1832,17 +2099,36 @@ function NotificationList({ data, onTest }: { data: Entity[]; onTest: () => void
                 <Typography.Text type="secondary">{String(item.channel ?? '-')}</Typography.Text>
               </div>
               <Space>
+                <Button onClick={() => openEdit(item)}>编辑</Button>
                 <Button loading={testingID === item.id} disabled={!enabled} onClick={() => void testConfig(item.id as string)}>
                   测试
                 </Button>
                 <Button loading={busyID === item.id} onClick={() => void setEnabled(item, !enabled)}>
                   {enabled ? '禁用' : '启用'}
                 </Button>
+                <Popconfirm title="删除通知配置" description="历史投递记录会保留，配置名显示为已删除。" onConfirm={() => void deleteConfig(item)}>
+                  <Button danger loading={busyID === item.id}>
+                    删除
+                  </Button>
+                </Popconfirm>
               </Space>
             </div>
           );
         }}
       />
+      <Drawer title="编辑通知配置" open={!!editing} onClose={() => setEditingID('')} width={440} footer={null} destroyOnClose>
+        {editing ? (
+          <Form form={form} layout="vertical">
+            <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item name="webhook_url" label="Webhook URL（留空不改）"><Input placeholder="https://qyapi.weixin.qq.com/..." /></Form.Item>
+            <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+            <Space>
+              <Button type="primary" loading={saving} onClick={() => void saveEdit()}>保存</Button>
+              <Button onClick={() => setEditingID('')}>取消</Button>
+            </Space>
+          </Form>
+        ) : null}
+      </Drawer>
     </div>
   );
 }
@@ -1880,6 +2166,161 @@ function CredentialForm({ onDone }: { onDone: () => void }) {
         保存凭据
       </Button>
     </Form>
+  );
+}
+
+function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: Entity[]; onDone: () => void }) {
+  const [editingID, setEditingID] = useState('');
+  const [busyID, setBusyID] = useState('');
+  const [form] = Form.useForm();
+  const editing = findByID(data, editingID);
+  function open(item: Entity) {
+    setEditingID(String(item.id ?? ''));
+    form.setFieldsValue({ name: item.name, description: item.description, enabled: item.enabled !== false });
+  }
+  async function submit() {
+    if (!editingID) return;
+    const values = await form.validateFields();
+    setBusyID(editingID);
+    try {
+      await apiPatch<Entity>(`/api/v1/credentials/${editingID}`, values);
+      setEditingID('');
+      onDone();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setBusyID('');
+    }
+  }
+  async function setEnabled(item: Entity, enabled: boolean) {
+    setBusyID(String(item.id ?? ''));
+    try {
+      await apiPatch<Entity>(`/api/v1/credentials/${item.id}`, { enabled });
+      onDone();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setBusyID('');
+    }
+  }
+  async function deleteCredential(item: Entity) {
+    setBusyID(String(item.id ?? ''));
+    try {
+      await apiDelete<Entity>(`/api/v1/credentials/${item.id}`);
+      onDone();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setBusyID('');
+    }
+  }
+  // 计算引用该凭据的服务器，供禁用/删除提示
+  function referencedServers(credentialID: ScalarValue) {
+    const id = scalarRef(credentialID);
+    return servers.filter((server) => scalarRef(server.credential_ref) === id);
+  }
+  return (
+    <div className="mini-list">
+      <Typography.Title level={4}>凭据</Typography.Title>
+      <DataList
+        data={data}
+        renderItem={(item) => {
+          const enabled = item.enabled !== false;
+          const refs = referencedServers(item.id);
+          return (
+            <div className="data-row">
+              <div className="data-main">
+                <Space>
+                  <Typography.Text strong>{item.name ?? item.id}</Typography.Text>
+                  <StatusTag value={enabled ? 'enabled' : 'disabled'} />
+                </Space>
+                <Typography.Text type="secondary">{`${item.type ?? '-'} / ${item.description ?? '-'}`}</Typography.Text>
+                {refs.length > 0 ? <Typography.Text type="warning">{`被 ${refs.length} 台服务器引用`}</Typography.Text> : null}
+              </div>
+              <Space>
+                <Button onClick={() => open(item)}>编辑</Button>
+                {enabled && refs.length > 0 ? (
+                  <Popconfirm
+                    title="禁用凭据"
+                    description={`该凭据被以下服务器引用，禁用后它们的 SSH 连接将失效：${refs.map((server) => String(server.name ?? server.id)).join('、')}`}
+                    onConfirm={() => void setEnabled(item, false)}
+                  >
+                    <Button loading={busyID === item.id}>禁用</Button>
+                  </Popconfirm>
+                ) : (
+                  <Button loading={busyID === item.id} onClick={() => void setEnabled(item, !enabled)}>
+                    {enabled ? '禁用' : '启用'}
+                  </Button>
+                )}
+                <Popconfirm
+                  title="删除凭据"
+                  description={refs.length > 0 ? '凭据仍被服务器引用，请先解除引用。' : '删除后不可恢复。'}
+                  disabled={refs.length > 0}
+                  onConfirm={() => void deleteCredential(item)}
+                >
+                  <Button danger loading={busyID === item.id} disabled={refs.length > 0}>
+                    删除
+                  </Button>
+                </Popconfirm>
+              </Space>
+            </div>
+          );
+        }}
+      />
+      <Drawer title="编辑凭据" open={!!editing} onClose={() => setEditingID('')} width={420} footer={null}>
+        {editing ? (
+          <Form form={form} layout="vertical">
+            <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+              <Input />
+            </Form.Item>
+            <Form.Item label="类型">
+              <Input value={String(editing.type ?? '-')} disabled />
+            </Form.Item>
+            <Form.Item name="description" label="描述">
+              <Input.TextArea rows={3} />
+            </Form.Item>
+            <Form.Item name="enabled" valuePropName="checked">
+              <Checkbox>启用</Checkbox>
+            </Form.Item>
+            <Typography.Text type="secondary">Secret 创建后不可修改；如需更换请删除后重建，并更新引用该凭据的服务器。</Typography.Text>
+            <div style={{ marginTop: 16 }}>
+              <Space>
+                <Button type="primary" loading={busyID === editingID} onClick={() => void submit()}>
+                  保存
+                </Button>
+                <Button onClick={() => setEditingID('')}>取消</Button>
+              </Space>
+            </div>
+          </Form>
+        ) : null}
+      </Drawer>
+    </div>
+  );
+}
+
+// 通知投递记录：config_id 找不到对应配置时显示"已删除配置"。
+function NotificationDeliveryList({ data, configs }: { data: Entity[]; configs: Entity[] }) {
+  return (
+    <div className="mini-list">
+      <Typography.Title level={4}>最近投递</Typography.Title>
+      <DataList
+        data={data}
+        renderItem={(item) => {
+          const config = findByID(configs, scalarRef(item.config_id));
+          return (
+            <div className="data-row compact">
+              <div className="data-main">
+                <Space>
+                  <Typography.Text strong>{config ? (config.name ?? config.id) : '已删除配置'}</Typography.Text>
+                  <StatusTag value={String(item.status ?? '-')} />
+                </Space>
+                <Typography.Text type="secondary">{`${item.event_type ?? '-'}${item.last_error ? ' · ' + item.last_error : ''}`}</Typography.Text>
+              </div>
+            </div>
+          );
+        }}
+      />
+    </div>
   );
 }
 
@@ -2103,14 +2544,6 @@ function formatActor(actorType: Entity[string], actorID: Entity[string], state: 
 function formatServerRef(serverID: Entity[string], state: AppState) {
   const id = scalarRef(serverID);
   return namedRef(findByID(state.servers, id), id, 'name');
-}
-
-function formatServerMembers(value: Entity[string], state: AppState) {
-  const ids = Array.isArray(value) ? value : value ? [value] : [];
-  if (ids.length === 0) {
-    return '无服务器';
-  }
-  return ids.map((id) => formatServerRef(id, state)).join(', ');
 }
 
 function targetRefFor(item: Entity, state: AppState) {

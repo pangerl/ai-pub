@@ -192,19 +192,18 @@ func (s Store) CreateEnvironment(ctx context.Context, item domain.Environment) (
 	if item.ID == "" {
 		item.ID = domain.NewID("env")
 	}
-	item.Enabled = true
 	item.CreatedAt = now
 	item.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO environments (id, name, slug, is_production, release_frozen, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Slug, boolInt(item.IsProduction), boolInt(item.ReleaseFrozen), boolInt(item.Enabled), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+INSERT INTO environments (id, name, slug, is_production, release_frozen, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.Name, item.Slug, boolInt(item.IsProduction), boolInt(item.ReleaseFrozen), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
 	return item, err
 }
 
 func (s Store) ListEnvironments(ctx context.Context) ([]domain.Environment, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, slug, is_production, release_frozen, enabled, created_at, updated_at
+SELECT id, name, slug, is_production, release_frozen, created_at, updated_at
 FROM environments ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
@@ -223,7 +222,7 @@ FROM environments ORDER BY created_at DESC, id DESC`)
 
 func (s Store) GetEnvironment(ctx context.Context, id string) (domain.Environment, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, name, slug, is_production, release_frozen, enabled, created_at, updated_at FROM environments WHERE id = ?`, id)
+SELECT id, name, slug, is_production, release_frozen, created_at, updated_at FROM environments WHERE id = ?`, id)
 	item, err := scanEnvironment(row)
 	return item, normalizeNotFound(err)
 }
@@ -237,11 +236,10 @@ func (s Store) UpdateEnvironment(ctx context.Context, id string, item domain.Env
 	existing.Slug = choose(item.Slug, existing.Slug)
 	existing.IsProduction = item.IsProduction
 	existing.ReleaseFrozen = item.ReleaseFrozen
-	existing.Enabled = item.Enabled
 	existing.UpdatedAt = nowUTC()
 	_, err = s.db.ExecContext(ctx, `
-UPDATE environments SET name = ?, slug = ?, is_production = ?, release_frozen = ?, enabled = ?, updated_at = ? WHERE id = ?`,
-		existing.Name, existing.Slug, boolInt(existing.IsProduction), boolInt(existing.ReleaseFrozen), boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
+UPDATE environments SET name = ?, slug = ?, is_production = ?, release_frozen = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Slug, boolInt(existing.IsProduction), boolInt(existing.ReleaseFrozen), formatTime(existing.UpdatedAt), id)
 	return existing, err
 }
 
@@ -831,12 +829,11 @@ func scanServiceVersion(row rowScanner) (domain.ServiceVersion, error) {
 
 func scanEnvironment(row rowScanner) (domain.Environment, error) {
 	var item domain.Environment
-	var isProduction, releaseFrozen, enabled int
+	var isProduction, releaseFrozen int
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.Name, &item.Slug, &isProduction, &releaseFrozen, &enabled, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.Name, &item.Slug, &isProduction, &releaseFrozen, &createdAt, &updatedAt)
 	item.IsProduction = isProduction == 1
 	item.ReleaseFrozen = releaseFrozen == 1
-	item.Enabled = enabled == 1
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, err
@@ -977,4 +974,12 @@ func newAPIKeySecret() (string, error) {
 func hashSecret(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// isMySQL 判断底层驱动是否为 MySQL，用于选择 MySQL 专有语法（如 FOR UPDATE 行锁）。
+func isMySQL(db *sql.DB) bool {
+	if db == nil {
+		return false
+	}
+	return strings.Contains(fmt.Sprintf("%T", db.Driver()), "mysql")
 }

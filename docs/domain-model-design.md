@@ -156,7 +156,6 @@ NotificationConfig 1 -- n NotificationDelivery
 | `slug` | 唯一标识 |
 | `is_production` | 是否生产环境 |
 | `release_frozen` | 是否冻结该环境的发布 |
-| `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
 约束：
@@ -164,6 +163,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - 生产判断必须依赖 `is_production`，不能依赖 tag 文本。
 - 生产环境固定要求管理员确认；非生产环境固定由发起人本人确认。
 - `release_frozen` 为环境唯一的发布冻结来源，不做系统或服务级覆盖。
+- 环境无 `enabled` 字段：发布保护统一由 `release_frozen` 承担，不存在"禁用环境"语义。
 
 ### 4.7 Server
 

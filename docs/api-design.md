@@ -309,6 +309,10 @@ POST /release-requests/{id}/preflight
 |------|------|------|
 | `GET` | `/credentials` | 凭据列表，不返回 secret |
 | `POST` | `/credentials` | 创建凭据 |
+| `PATCH` | `/credentials/{id}` | 更新 name/description/enabled；不允许改 type 与 secret |
+| `DELETE` | `/credentials/{id}` | 删除；仍被服务器引用（含已禁用）时返回 `409 credential_in_use` |
+
+凭据校验：服务器创建/更新时，`auth_type != none` 必须引用存在且启用的凭据，否则返回 `400`。删除凭据的引用检查与删除在单事务内完成，避免并发先查后删。
 
 ### 11.2 通知
 
@@ -317,8 +321,13 @@ POST /release-requests/{id}/preflight
 | `GET` | `/notification-configs` | 通知配置列表 |
 | `POST` | `/notification-configs` | 创建企业微信机器人 webhook |
 | `PATCH` | `/notification-configs/{id}` | 更新 |
+| `DELETE` | `/notification-configs/{id}` | 删除；历史投递记录保留 config_id 悬空引用，前端显示"已删除配置" |
 | `POST` | `/notification-configs/{id}/test` | 测试发送 |
 | `GET` | `/notification-deliveries` | 发送记录 |
+
+### 11.3 删除边界
+
+已被发布链路引用的实体（项目、服务、版本、环境、服务器、服务器组、部署目标、用户）只能禁用，不能删除，以保护审计完整性。未被引用的辅助实体（凭据、通知配置、访问密钥）支持删除；凭据删除需通过服务器引用校验。
 
 ## 12. 运维接口
 

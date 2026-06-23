@@ -46,7 +46,6 @@ type Environment struct {
 	Slug          string    `json:"slug"`
 	IsProduction  bool      `json:"is_production"`
 	ReleaseFrozen bool      `json:"release_frozen"`
-	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

@@ -3,9 +3,13 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"ai-pub/internal/domain"
 )
+
+// ErrCredentialInUse 表示凭据仍被服务器引用，不能删除。
+var ErrCredentialInUse = errors.New("credential is still referenced by servers")
 
 type CredentialSecret struct {
 	Credential domain.Credential
@@ -73,6 +77,59 @@ FROM credentials WHERE id = ? AND enabled = 1`, id)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return CredentialSecret{Credential: item, Secret: secretEnc}, nil
+}
+
+// UpdateCredential 更新凭据可变字段（name/description/enabled），不允许改 type 与 secret。
+func (s Store) UpdateCredential(ctx context.Context, id string, item domain.Credential) (domain.Credential, error) {
+	existing, err := s.GetCredential(ctx, id)
+	if err != nil {
+		return domain.Credential{}, err
+	}
+	existing.Name = choose(item.Name, existing.Name)
+	existing.Description = item.Description
+	existing.Enabled = item.Enabled
+	existing.UpdatedAt = nowUTC()
+	_, err = s.db.ExecContext(ctx, `
+UPDATE credentials SET name = ?, description = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Description, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
+	if err != nil {
+		return domain.Credential{}, err
+	}
+	return existing, nil
+}
+
+// DeleteCredential 在单事务内检查服务器引用并删除凭据。
+// MySQL 下用 SELECT ... FOR UPDATE 对引用该凭据的服务器行加锁，阻塞并发的服务器插入/引用写入，
+// 真正消除"计数后并发插入同一 credential_ref"的 TOCTOU 窗口。
+// SQLite（测试用）不支持 FOR UPDATE，退化为普通 SELECT；测试为单连接无并发，不影响覆盖。
+func (s Store) DeleteCredential(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	countSQL := `SELECT COUNT(*) FROM servers WHERE credential_ref = ?`
+	if isMySQL(s.db) {
+		countSQL = `SELECT COUNT(*) FROM servers WHERE credential_ref = ? FOR UPDATE`
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, countSQL, id).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrCredentialInUse
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM credentials WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CountServersByCredential 返回引用指定凭据的服务器数，供前端禁用提示使用。
+func (s Store) CountServersByCredential(ctx context.Context, credentialID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM servers WHERE credential_ref = ?`, credentialID).Scan(&count)
+	return count, err
 }
 
 func scanCredential(row rowScanner) (domain.Credential, error) {

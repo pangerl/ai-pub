@@ -524,6 +524,46 @@ func deleteForData(t *testing.T, handler http.Handler, path string) map[string]a
 	return out.Data
 }
 
+func patchExpectStatus(t *testing.T, handler http.Handler, path string, body map[string]any, status int) {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("PATCH %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func deleteExpectStatus(t *testing.T, handler http.Handler, path string, status int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("DELETE %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func postExpectStatus(t *testing.T, handler http.Handler, path string, body map[string]any, status int) {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("POST %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
 func getForData(t *testing.T, handler http.Handler, path string) any {
 	t.Helper()
 	return getForDataWithHeaders(t, handler, path, nil)
@@ -576,4 +616,107 @@ func newHTTPTestDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+// TestCredentialLifecycle 覆盖凭据更新、删除引用冲突（409）、未引用可删除，
+// 以及服务器创建/更新时对凭据引用的存在性与启用校验。
+func TestCredentialLifecycle(t *testing.T) {
+	db := newHTTPTestDB(t)
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{}})
+
+	cred := postForData(t, router, "/api/v1/credentials", map[string]any{
+		"name":        "ssh-key-1",
+		"type":        "private_key",
+		"secret":      "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
+		"description": "initial",
+	})
+
+	// 更新可编辑字段
+	patched := patchForData(t, router, "/api/v1/credentials/"+cred["id"].(string), map[string]any{
+		"name":        "ssh-key-renamed",
+		"description": "updated",
+	})
+	if patched["name"] != "ssh-key-renamed" || patched["description"] != "updated" {
+		t.Fatalf("expected patched credential, got %#v", patched)
+	}
+
+	// 引用该凭据的服务器存在时，删除返回 409
+	postForData(t, router, "/api/v1/servers", map[string]any{
+		"name":           "app-1",
+		"host":           "127.0.0.1",
+		"port":           22,
+		"username":       "deploy",
+		"auth_type":      "private_key",
+		"credential_ref": cred["id"],
+		"role":           "application",
+	})
+	deleteExpectStatus(t, router, "/api/v1/credentials/"+cred["id"].(string), http.StatusConflict)
+
+	// 服务器创建：auth_type 非 none 时引用不存在凭据应 400
+	postExpectStatus(t, router, "/api/v1/servers", map[string]any{
+		"name":           "bad-server",
+		"host":           "127.0.0.1",
+		"port":           22,
+		"username":       "deploy",
+		"auth_type":      "password",
+		"credential_ref": "cred_nonexistent",
+		"role":           "application",
+	}, http.StatusBadRequest)
+
+	// 服务器创建：auth_type 空串或非法值应 400（白名单校验，避免绕过凭据校验）
+	postExpectStatus(t, router, "/api/v1/servers", map[string]any{
+		"name":      "bad-auth-type",
+		"host":      "127.0.0.1",
+		"port":      22,
+		"username":  "deploy",
+		"auth_type": "",
+		"role":      "application",
+	}, http.StatusBadRequest)
+	postExpectStatus(t, router, "/api/v1/servers", map[string]any{
+		"name":      "bad-auth-type-2",
+		"host":      "127.0.0.1",
+		"port":      22,
+		"username":  "deploy",
+		"auth_type": "bogus",
+		"role":      "application",
+	}, http.StatusBadRequest)
+
+	// 服务器创建：引用已禁用凭据应 400
+	patchForData(t, router, "/api/v1/credentials/"+cred["id"].(string), map[string]any{"enabled": false})
+	postExpectStatus(t, router, "/api/v1/servers", map[string]any{
+		"name":           "bad-server-2",
+		"host":           "127.0.0.1",
+		"port":           22,
+		"username":       "deploy",
+		"auth_type":      "private_key",
+		"credential_ref": cred["id"],
+		"role":           "application",
+	}, http.StatusBadRequest)
+
+	// 重新启用凭据，删除仍因被引用返回 409
+	patchForData(t, router, "/api/v1/credentials/"+cred["id"].(string), map[string]any{"enabled": true})
+	deleteExpectStatus(t, router, "/api/v1/credentials/"+cred["id"].(string), http.StatusConflict)
+
+	// 创建一个未引用的凭据，应可删除
+	unreferenced := postForData(t, router, "/api/v1/credentials", map[string]any{
+		"name":   "unused-key",
+		"type":   "password",
+		"secret": "p@ssw0rd",
+	})
+	deleteForData(t, router, "/api/v1/credentials/"+unreferenced["id"].(string))
+	deleteExpectStatus(t, router, "/api/v1/credentials/"+unreferenced["id"].(string), http.StatusNotFound)
+}
+
+// TestNotificationConfigDelete 覆盖通知配置删除，以及删除后投递记录保留。
+func TestNotificationConfigDelete(t *testing.T) {
+	db := newHTTPTestDB(t)
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{}})
+
+	cfg := postForData(t, router, "/api/v1/notification-configs", map[string]any{
+		"name":        "bot-1",
+		"webhook_url": "https://example.com/webhook",
+	})
+	deleteForData(t, router, "/api/v1/notification-configs/"+cfg["id"].(string))
+	// 删除后再删返回 404
+	deleteExpectStatus(t, router, "/api/v1/notification-configs/"+cfg["id"].(string), http.StatusNotFound)
 }

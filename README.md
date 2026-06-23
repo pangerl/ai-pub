@@ -104,8 +104,9 @@ make compose-down
 - `GET/POST /api-keys`
 - `PATCH/DELETE /api-keys/{id}`
 - `GET/POST /credentials`
+- `PATCH/DELETE /credentials/{id}`
 - `GET/POST /notification-configs`
-- `PATCH /notification-configs/{id}`
+- `PATCH/DELETE /notification-configs/{id}`
 - `POST /notification-configs/{id}/test`
 - `GET /notification-deliveries`
 - `POST /release-requests/preflight`

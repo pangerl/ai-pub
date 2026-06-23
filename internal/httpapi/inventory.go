@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -222,7 +223,6 @@ func patchEnvironment(store repository.Store) http.HandlerFunc {
 			Slug          *string `json:"slug"`
 			IsProduction  *bool   `json:"is_production"`
 			ReleaseFrozen *bool   `json:"release_frozen"`
-			Enabled       *bool   `json:"enabled"`
 		}
 		if !decodeJSON(w, r, &patch) {
 			return
@@ -238,9 +238,6 @@ func patchEnvironment(store repository.Store) http.HandlerFunc {
 		}
 		if patch.ReleaseFrozen != nil {
 			existing.ReleaseFrozen = *patch.ReleaseFrozen
-		}
-		if patch.Enabled != nil {
-			existing.Enabled = *patch.Enabled
 		}
 		item, err := store.UpdateEnvironment(r.Context(), existing.ID, existing)
 		if err != nil {
@@ -266,6 +263,10 @@ func createServer(store repository.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input domain.Server
 		if !decodeJSON(w, r, &input) {
+			return
+		}
+		if err := validateServerCredential(r.Context(), store, input.AuthType, input.CredentialRef); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
 			return
 		}
 		item, err := store.CreateServer(r.Context(), input)
@@ -325,6 +326,10 @@ func patchServer(store repository.Store) http.HandlerFunc {
 		if patch.Enabled != nil {
 			existing.Enabled = *patch.Enabled
 		}
+		if err := validateServerCredential(r.Context(), store, existing.AuthType, existing.CredentialRef); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
 		item, err := store.UpdateServer(r.Context(), existing.ID, existing)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
@@ -332,6 +337,34 @@ func patchServer(store repository.Store) http.HandlerFunc {
 		}
 		writeData(w, r, http.StatusOK, item)
 	}
+}
+
+// validateServerCredential 校验服务器认证配置：
+// auth_type 必须是 none/password/private_key 之一（白名单，拒绝空串与未知值，避免绕过校验）；
+// 非 none 时必须引用存在且启用的凭据，与凭据禁用/删除形成闭环，避免运行时 SSH 失败。
+func validateServerCredential(ctx context.Context, store repository.Store, authType string, credentialRef string) error {
+	switch authType {
+	case "none":
+		return nil
+	case "password", "private_key":
+		// 继续做凭据引用校验
+	default:
+		return errors.New("auth_type must be one of none, password, private_key")
+	}
+	if credentialRef == "" {
+		return errors.New("credential_ref is required when auth_type is not none")
+	}
+	cred, err := store.GetCredential(ctx, credentialRef)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return errors.New("credential_ref references a non-existent credential")
+		}
+		return err
+	}
+	if !cred.Enabled {
+		return errors.New("credential_ref references a disabled credential")
+	}
+	return nil
 }
 
 func listServerGroups(store repository.Store) http.HandlerFunc {

@@ -117,6 +117,16 @@ FROM notification_configs WHERE id = ?`, id)
 	return item, normalizeNotFound(err)
 }
 
+// DeleteNotificationConfig 删除通知配置；历史投递记录的 config_id 保留为悬空引用，
+// 前端找不到配置时显示"已删除配置"，不做级联删除以保留投递审计。
+func (s Store) DeleteNotificationConfig(ctx context.Context, id string) error {
+	if _, err := s.getNotificationWebhookByID(ctx, id); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM notification_configs WHERE id = ?`, id)
+	return err
+}
+
 func (s Store) CreateNotificationDelivery(ctx context.Context, item domain.NotificationDelivery) (domain.NotificationDelivery, error) {
 	now := nowUTC()
 	if item.ID == "" {
