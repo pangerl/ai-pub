@@ -145,11 +145,12 @@ func TestReleaseServiceM2Flow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[len(events)-1].EventType != "preflight_checked" {
-		t.Fatalf("expected preflight_checked event, got %#v", events)
+	// PreflightExisting 仅供详情页展示，不应再落审计事件
+	if events[len(events)-1].EventType != "release_confirmed" {
+		t.Fatalf("expected release_confirmed to remain last event after preflight-existing, got %#v", events)
 	}
-	if countReleaseEventType(events, "preflight_checked") != 2 {
-		t.Fatalf("expected create and explicit preflight events, got %#v", events)
+	if countReleaseEventType(events, "preflight_checked") != 1 {
+		t.Fatalf("expected only create-time preflight_checked event, got %#v", events)
 	}
 
 	if _, err := db.Exec(`UPDATE release_requests SET status = 'running' WHERE id = ?`, created.ID); err != nil {

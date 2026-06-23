@@ -184,19 +184,13 @@ func (s ReleaseService) PreflightExisting(ctx context.Context, id string, actor 
 	if err != nil {
 		return PreflightResult{}, err
 	}
-	result, err := s.Preflight(ctx, PreflightInput{
+	// 仅用于详情页面板展示当前可发性，不落审计事件，避免污染事件流。
+	return s.Preflight(ctx, PreflightInput{
 		ServiceID:          release.ServiceID,
 		EnvironmentID:      release.EnvironmentID,
 		ServiceVersionID:   release.ServiceVersionID,
 		DeploymentTargetID: release.DeploymentTargetID,
 	})
-	if err != nil {
-		return PreflightResult{}, err
-	}
-	actorType := chooseString(actor.Type, "system")
-	actorID := chooseString(actor.ID, "preflight")
-	s.recordPreflightEvent(ctx, release.ID, result, Actor{Type: actorType, ID: actorID, APIKeyID: actor.APIKeyID})
-	return result, nil
 }
 
 func (s ReleaseService) Create(ctx context.Context, input CreateReleaseInput) (domain.ReleaseRequest, PreflightResult, error) {
@@ -260,7 +254,8 @@ func (s ReleaseService) Create(ctx context.Context, input CreateReleaseInput) (d
 		APIKeyID:         input.APIKeyID,
 		Message:          "发布单已创建",
 	})
-	s.recordPreflightEvent(ctx, item.ID, preflight, Actor{Type: input.CreatedByType, ID: input.CreatedByID, APIKeyID: input.APIKeyID})
+	// 标注为创建时的系统复检（非用户主动预检），避免在事件流中与用户操作混淆。
+	s.recordPreflightEvent(ctx, item.ID, preflight, Actor{Type: "system", ID: "create_recheck", APIKeyID: input.APIKeyID})
 	if preflight.ConfirmMode == "admin_confirm" {
 		s.notifyProductionPending(ctx, item)
 	}
