@@ -102,6 +102,26 @@ type ReleaseView = 'pending' | 'mine' | 'all';
 type InfrastructureView = 'overview' | 'application' | 'runtime' | 'targeting' | 'state';
 type ManagementView = 'overview' | 'users' | 'access' | 'notifications' | 'credentials';
 
+// 配置页创建抽屉：正在创建的实体类型（枚举防拼写错误）。
+type CreatingKind =
+  | 'project' | 'service' | 'version'
+  | 'environment' | 'server' | 'server-group'
+  | 'deployment-target';
+
+// 创建链式推进时的上游预填；creatingPrefill 为唯一预填来源，不 fallback 到 selection。
+type CreatingPrefill = {
+  projectID?: string;
+  serviceID?: string;
+  environmentID?: string;
+  targetType?: string;
+  targetRefID?: string;
+};
+
+// 创建成功后底部「下一步」CTA；纯数据，由渲染层派发（不在 state 中存函数闭包，避免 React Compiler 放弃 memo）。
+// 创建成功后底部「下一步」CTA；纯数据，由渲染层派发（不在 state 中存函数闭包，避免 React Compiler 放弃 memo）。
+// goToCreate 场景下 targetID 为刚创建的部署目标 id（与 prefill.targetRefID「运行目标 id」语义区分）。
+type NextCreateAction = { label: string; kind: CreatingKind; prefill: CreatingPrefill; goToCreate?: boolean; targetID?: string } | null;
+
 type AppRoute = {
   page: Page;
   releaseID?: string;
@@ -179,7 +199,6 @@ export function App() {
   const [activeRelease, setActiveRelease] = useState<Entity | null>(null);
   const [activeDeployID, setActiveDeployID] = useState('');
   const [selection, setSelection] = useState<Selection>({ serviceID: '', environmentID: '', versionID: '', targetID: '', userID: '' });
-  const [manualTargetRef, setManualTargetRef] = useState<ManualTargetRef>({ targetType: '', targetRefID: '' });
   const [filters, setFilters] = useState<ListFilters>({ scoped: true, releaseStatus: 'all', deployStatus: 'all' });
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -200,6 +219,45 @@ export function App() {
   }
   function closeEditor() {
     setEditingEntity(null);
+  }
+  // 配置页创建抽屉：creatingKind 标记正在创建的实体类型；creatingPrefill 为链式推进的上游预填（唯一来源）。
+  const [creatingKind, setCreatingKind] = useState<CreatingKind | null>(null);
+  const [creatingPrefill, setCreatingPrefill] = useState<CreatingPrefill>({});
+  const [nextCreateAction, setNextCreateAction] = useState<NextCreateAction>(null);
+  function openCreator(kind: CreatingKind, prefill: CreatingPrefill = {}) {
+    // 创建/编辑互斥：打开创建前先关闭可能存在的编辑抽屉。
+    closeEditor();
+    setCreatingPrefill(prefill);
+    setNextCreateAction(null);
+    setCreatingKind(kind);
+  }
+  function closeCreator() {
+    setCreatingKind(null);
+    setCreatingPrefill({});
+    setNextCreateAction(null);
+  }
+  // 创建成功回调：刷新数据，并按业务流设定「下一步」CTA（纯数据，点击才推进，不自动强跳）。
+  // 上游预填尽量从 created 推导；server/server-group → 部署目标缺 service/env 时由用户在表单内手选。
+  function handleCreated(kind: CreatingKind, created: Entity) {
+    void refreshAll();
+    const id = String(created.id ?? '');
+    if (kind === 'project') {
+      setNextCreateAction({ label: '为该项目创建服务', kind: 'service', prefill: { projectID: id } });
+    } else if (kind === 'service') {
+      setNextCreateAction({ label: '为该服务创建版本', kind: 'version', prefill: { serviceID: id } });
+    } else if (kind === 'version') {
+      // 版本是应用支（项目→服务→版本）的自然终点，与运行支无直接依赖，不强行引导到环境。
+      setNextCreateAction(null);
+    } else if (kind === 'environment') {
+      setNextCreateAction({ label: '登记服务器', kind: 'server', prefill: {} });
+    } else if (kind === 'server') {
+      // 部署目标还需 service+environment；此处仅预填运行目标，service/env 留给用户在表单内选。
+      setNextCreateAction({ label: '建立部署连接', kind: 'deployment-target', prefill: { targetType: 'server', targetRefID: id } });
+    } else if (kind === 'server-group') {
+      setNextCreateAction({ label: '建立部署连接', kind: 'deployment-target', prefill: { targetType: 'server_group', targetRefID: id } });
+    } else if (kind === 'deployment-target') {
+      setNextCreateAction({ label: '创建发布单', kind: 'deployment-target', prefill: { serviceID: String(created.service_id ?? ''), environmentID: String(created.environment_id ?? '') }, goToCreate: true, targetID: id });
+    }
   }
   // 行内启用/禁用：调用 PATCH { enabled }。
   async function toggleEntityEnabled(item: Entity, kind: string, enabled: boolean) {
@@ -905,20 +963,38 @@ export function App() {
                       <InfrastructureStat label="运行目标" value={state.servers.length + state.serverGroups.length} action="配置服务器或分组" onClick={() => setInfrastructureView('runtime')} />
                       <InfrastructureStat label="可发布连接" value={state.targets.filter((item) => item.enabled !== false).length} action="绑定服务与环境" onClick={() => setInfrastructureView('targeting')} />
                     </div></section>
-                    <section className="surface infrastructure-guide"><span className="mono-label">推荐顺序</span><h2>把一次发布需要的对象连起来。</h2><ol><li><strong>定义应用</strong><span>创建项目、服务和可发布版本。</span></li><li><strong>准备运行环境</strong><span>登记环境、服务器以及需要批量执行的服务器组。</span></li><li><strong>建立部署连接</strong><span>将服务、环境和运行目标组成部署目标，发布时即可选择。</span></li></ol></section>
+                    <section className="surface infrastructure-guide"><span className="mono-label">推荐顺序</span><h2>从首个对象到发布单。</h2><p>按发布实际依赖继续创建；SSH 服务器需要凭据时，会在服务器表单中直接提示创建。</p><div className="infrastructure-guide-actions"><button onClick={() => setInfrastructureView('application')}><strong>1. 定义应用</strong><small>{`${state.projects.length} 项目 / ${state.services.length} 服务 / ${state.versions.length} 版本`}</small><span>{state.projects.length > 0 && state.services.length > 0 && state.versions.length > 0 ? '查看应用与版本' : '创建项目、服务和版本'} →</span></button><button onClick={() => setInfrastructureView('runtime')}><strong>2. 准备运行环境</strong><small>{`${state.environments.length} 环境 / ${state.servers.length + state.serverGroups.length} 运行目标`}</small><span>{state.environments.length > 0 && state.servers.length + state.serverGroups.length > 0 ? '查看运行环境' : '创建环境和服务器'} →</span></button><button onClick={() => state.targets.some((item) => item.enabled !== false) ? setPage('create') : setInfrastructureView('targeting')}><strong>3. 建立部署连接</strong><small>{`${state.targets.filter((item) => item.enabled !== false).length} 个可发布部署目标`}</small><span>{state.targets.some((item) => item.enabled !== false) ? '创建发布单' : '连接服务、环境与目标'} →</span></button></div></section>
                   </> : null}
                   {infrastructureView === 'application' ? <>
                     <InfrastructureSectionHeading eyebrow="APPLICATION" title="应用与版本" description="这是发布内容的来源。先创建项目和服务，再为服务登记可部署版本。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="已注册对象" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="项目" data={state.projects} nameField="name" subFields={['slug', 'description']} onOpen={(item) => openEditor(item, 'project')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'project', enabled)} /><EditableInventoryList title="服务" data={state.services} nameField="name" subFields={['slug']} onOpen={(item) => openEditor(item, 'service')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'service', enabled)} /><EntityList title="当前服务版本（不可编辑）" data={state.versions} fields={['version', 'source']} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="逐步创建" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 项目</h3><ProjectForm onDone={() => void refreshAll()} /></div><div><h3>2. 服务</h3><ServiceForm projects={state.projects} onDone={(service) => refreshWithSelection({ serviceID: String(service.id ?? ''), versionID: '', targetID: '' })} /></div><div><h3>3. 版本</h3><VersionForm services={state.services} onDone={(version) => refreshWithSelection({ serviceID: String(version.service_id ?? ''), versionID: String(version.id ?? '') })} /></div></div></section></div>
-                    <section className="surface service-detail"><SectionTitle title="服务部署视图" meta="SERVICE" /><LabeledSelect label="服务" value={selected.service?.id} options={state.services} nameField="name" onChange={(value) => refreshWithSelection({ serviceID: value, versionID: '', targetID: '' })} /><ServiceDetail service={selected.service} versions={state.versions} targets={state.targets} environments={state.environments} states={state.states} /></section>
+                    <div className="infrastructure-create-bar">
+                      <Button type="primary" onClick={() => openCreator('project')}>新建项目</Button>
+                      <Button onClick={() => openCreator('service')}>新建服务</Button>
+                      <Button onClick={() => openCreator('version')}>新建版本</Button>
+                    </div>
+                    <section className="surface infrastructure-inventory"><SectionTitle title="已注册对象" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="项目" data={state.projects} nameField="name" subFields={['slug', 'description']} onOpen={(item) => openEditor(item, 'project')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'project', enabled)} /><EditableInventoryList title="服务" data={state.services} nameField="name" subFields={['slug']} onOpen={(item) => openEditor(item, 'service')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'service', enabled)} /><EntityList title="当前服务版本（不可编辑）" data={state.versions} fields={['version', 'source']} /></div></section>
+                    <details className="surface service-detail">
+                      <summary><SectionTitle title="服务部署视图" meta="SERVICE" /></summary>
+                      <LabeledSelect label="服务" value={selected.service?.id} options={state.services} nameField="name" onChange={(value) => refreshWithSelection({ serviceID: value, versionID: '', targetID: '' })} />
+                      <ServiceDetail service={selected.service} versions={state.versions} targets={state.targets} environments={state.environments} states={state.states} />
+                    </details>
                   </> : null}
                   {infrastructureView === 'runtime' ? <>
                     <InfrastructureSectionHeading eyebrow="RUNTIME" title="运行环境" description="管理发布到哪里，以及哪些服务器作为一个批次共同执行。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="环境" data={state.environments} nameField="name" subFields={['slug', 'is_production']} frozenField="release_frozen" onOpen={(item) => openEditor(item, 'environment')} onToggleFrozen={(item, frozen) => void toggleEnvironmentFrozen(item, frozen)} /><EditableInventoryList title="服务器" data={state.servers} nameField="name" subFields={['host', 'role', 'username', 'last_check_status']} onOpen={(item) => openEditor(item, 'server')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server', enabled)} /><EditableInventoryList title="服务器组" data={state.serverGroups} nameField="name" subFields={['description']} onOpen={(item) => openEditor(item, 'server-group')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server-group', enabled)} /></div></section><section className="surface infrastructure-actions"><SectionTitle title="新增运行资源" meta="CREATE" /><div className="infrastructure-form-stack"><div><h3>1. 环境</h3><EnvironmentForm onDone={(environment) => refreshWithSelection({ environmentID: String(environment.id ?? ''), targetID: '' })} /></div><div><h3>2. 服务器</h3><ServerForm servers={state.servers} credentials={state.credentials} onDone={(server) => { setManualTargetRef({ targetType: 'server', targetRefID: String(server.id ?? '') }); void refreshAll(); }} /></div><div><h3>3. 服务器组</h3><ServerGroupForm servers={state.servers} onDone={(group) => { setManualTargetRef({ targetType: 'server_group', targetRefID: String(group.id ?? '') }); void refreshAll(); }} /></div></div></section></div>
+                    <div className="infrastructure-create-bar">
+                      <Button type="primary" onClick={() => openCreator('environment')}>新建环境</Button>
+                      <Button onClick={() => openCreator('server')}>新建服务器</Button>
+                      <Button onClick={() => openCreator('server-group')}>新建服务器组</Button>
+                    </div>
+                    <section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="环境" data={state.environments} nameField="name" subFields={['slug', 'is_production']} frozenField="release_frozen" onOpen={(item) => openEditor(item, 'environment')} onToggleFrozen={(item, frozen) => void toggleEnvironmentFrozen(item, frozen)} /><EditableInventoryList title="服务器" data={state.servers} nameField="name" subFields={['host', 'role', 'username', 'last_check_status']} onOpen={(item) => openEditor(item, 'server')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server', enabled)} /><EditableInventoryList title="服务器组" data={state.serverGroups} nameField="name" subFields={['description']} onOpen={(item) => openEditor(item, 'server-group')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server-group', enabled)} /></div></section>
                   </> : null}
                   {infrastructureView === 'targeting' ? <>
                     <InfrastructureSectionHeading eyebrow="DEPLOYMENT TARGET" title="部署连接" description="把服务、环境与服务器或服务器组组合为发布时可选择的部署目标。" />
-                    <div className="infrastructure-columns"><section className="surface infrastructure-inventory"><SectionTitle title="现有部署目标" meta="INVENTORY" /><DeploymentTargetList data={state.targets} state={state} onOpen={(item) => openEditor(item, 'deployment-target')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'deployment-target', enabled)} /><div className="targeting-note"><strong>当前选择</strong><span>{selected.service?.name ?? '未选择服务'} / {selected.environment?.name ?? '未选择环境'}</span></div></section><section className="surface infrastructure-actions"><SectionTitle title="新建部署目标" meta="CREATE" /><DeploymentTargetForm services={state.services} environments={state.environments} servers={state.servers} serverGroups={state.serverGroups} selectedServiceID={selection.serviceID} selectedEnvironmentID={selection.environmentID} preferredTargetRef={manualTargetRef} onDone={(target) => refreshWithSelection({ serviceID: String(target.service_id ?? ''), environmentID: String(target.environment_id ?? ''), targetID: String(target.id ?? '') })} /></section></div>
+                    <DependencyChecklist state={state} onOpenApplication={() => setInfrastructureView('application')} onOpenRuntime={() => setInfrastructureView('runtime')} />
+                    <div className="infrastructure-create-bar">
+                      <Button type="primary" disabled={state.services.length === 0 || state.environments.length === 0} onClick={() => openCreator('deployment-target')}>新建部署目标</Button>
+                    </div>
+                    <section className="surface infrastructure-inventory"><SectionTitle title="现有部署目标" meta="INVENTORY" /><DeploymentTargetList data={state.targets} state={state} onOpen={(item) => openEditor(item, 'deployment-target')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'deployment-target', enabled)} /><div className="targeting-note"><strong>当前选择</strong><span>{selected.service?.name ?? '未选择服务'} / {selected.environment?.name ?? '未选择环境'}</span></div></section>
                   </> : null}
                   {infrastructureView === 'state' ? <>
                     <InfrastructureSectionHeading eyebrow="RUNTIME STATE" title="当前部署状态" description="查看每台服务器最后一次成功部署后的版本状态；它是运行视图，不是配置入口。" />
@@ -932,6 +1008,68 @@ export function App() {
                 <ServerEditorDrawer open={!!editingEntity && editingEntity._kind === 'server'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} credentials={state.credentials} />
                 <ServerGroupEditorDrawer open={!!editingEntity && editingEntity._kind === 'server-group'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} />
                 <DeploymentTargetEditorDrawer open={!!editingEntity && editingEntity._kind === 'deployment-target'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} serverGroups={state.serverGroups} />
+                <Drawer title={creatingKind ? createDrawerTitles[creatingKind] : ''} open={creatingKind !== null} onClose={closeCreator} width={520} footer={null} destroyOnClose>
+                  {creatingKind === 'project' ? <ProjectForm onDone={(project) => handleCreated('project', project)} /> : null}
+                  {creatingKind === 'service' ? <ServiceForm projects={state.projects} selectedProjectID={creatingPrefill.projectID} onDone={(service) => handleCreated('service', service)} /> : null}
+                  {creatingKind === 'version' ? <VersionForm services={state.services} selectedServiceID={creatingPrefill.serviceID} onDone={(version) => handleCreated('version', version)} /> : null}
+                  {creatingKind === 'environment' ? <EnvironmentForm onDone={(environment) => handleCreated('environment', environment)} /> : null}
+                  {creatingKind === 'server' ? <ServerForm servers={state.servers} credentials={state.credentials} onCredentialsChanged={() => void refreshAll()} onDone={(server) => handleCreated('server', server)} /> : null}
+                  {creatingKind === 'server-group' ? <ServerGroupForm servers={state.servers} onDone={(group) => handleCreated('server-group', group)} /> : null}
+                  {creatingKind === 'deployment-target' ? (
+                    <DeploymentTargetForm
+                      services={state.services}
+                      environments={state.environments}
+                      servers={state.servers}
+                      serverGroups={state.serverGroups}
+                      selectedServiceID={creatingPrefill.serviceID ?? ''}
+                      selectedEnvironmentID={creatingPrefill.environmentID ?? ''}
+                      preferredTargetRef={{ targetType: creatingPrefill.targetType ?? '', targetRefID: creatingPrefill.targetRefID ?? '' }}
+                      onDone={(target) => handleCreated('deployment-target', target)}
+                    />
+                  ) : null}
+                  {nextCreateAction ? (
+                    <div className="create-next-action">
+                      <Button
+                        type="primary"
+                        onClick={() => {
+                          const action = nextCreateAction;
+                          if (!action) return;
+                          if (action.goToCreate) {
+                            changeSelection({ serviceID: action.prefill.serviceID ?? '', environmentID: action.prefill.environmentID ?? '', versionID: '', targetID: action.targetID ?? '' });
+                            void refreshAll();
+                            closeCreator();
+                            setPage('create');
+                            return;
+                          }
+                          if (action.kind === 'deployment-target') {
+                            // server/server-group → 部署目标：service/env 不在 prefill，从现有实体补全；缺则引导先创建。
+                            const sid = action.prefill.serviceID || (state.services.length > 0 ? String(state.services[0].id ?? '') : '');
+                            const eid = action.prefill.environmentID || (state.environments.length > 0 ? String(state.environments[0].id ?? '') : '');
+                            if (!action.prefill.targetRefID) {
+                              message.warning('请先创建运行目标，再建立部署连接');
+                              return;
+                            }
+                            if (!sid) {
+                              message.warning('请先创建服务，再建立部署连接');
+                              setInfrastructureView('application');
+                              return;
+                            }
+                            if (!eid) {
+                              message.warning('请先创建环境，再建立部署连接');
+                              setInfrastructureView('runtime');
+                              return;
+                            }
+                            openCreator(action.kind, { ...action.prefill, serviceID: sid, environmentID: eid });
+                            return;
+                          }
+                          openCreator(action.kind, action.prefill);
+                        }}
+                      >
+                        {nextCreateAction.label} →
+                      </Button>
+                    </div>
+                  ) : null}
+                </Drawer>
               </section>
             </>
           ) : null}
@@ -1006,6 +1144,24 @@ function SetupChecklist({
   onOpen: (key: 'application' | 'runtime' | 'targeting') => void;
 }) {
   return <section className="surface setup-checklist"><div><span className="mono-label">FIRST RELEASE SETUP</span><h2>先把发布所需的最小对象准备好。</h2><p>不需要填写额外流程或说明；完成以下三步后即可创建发布单。</p></div><ol>{steps.map((step, index) => <li key={step.key} className={step.complete ? 'complete' : ''}><span>{step.complete ? '✓' : `0${index + 1}`}</span><div><strong>{step.label}</strong><small>{step.detail}</small></div><Button type={step.complete ? 'default' : 'primary'} onClick={() => onOpen(step.key)}>{step.complete ? '查看' : '去完成'}</Button></li>)}</ol></section>;
+}
+
+function DependencyChecklist({ state, onOpenApplication, onOpenRuntime }: { state: AppState; onOpenApplication: () => void; onOpenRuntime: () => void }) {
+  const items = [
+    { label: '服务与版本', complete: state.services.length > 0 && state.versions.length > 0, onClick: onOpenApplication },
+    { label: '环境', complete: state.environments.length > 0, onClick: onOpenRuntime },
+    { label: '服务器或服务器组', complete: state.servers.length + state.serverGroups.length > 0, onClick: onOpenRuntime },
+  ];
+  if (items.every((item) => item.complete)) return null;
+  return (
+    <div className="dependency-checklist">
+      {items.map((item) => (
+        <button className={item.complete ? 'complete' : ''} key={item.label} onClick={item.onClick}>
+          <span>{item.complete ? '✓' : '!'}</span>{item.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function ReleaseRows({ data, state, onOpen }: { data: Entity[]; state: AppState; onOpen: (item: Entity) => void }) {
@@ -1522,15 +1678,27 @@ function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers
   );
 }
 
-function ProjectForm({ onDone }: { onDone: () => void }) {
+// 创建抽屉薄壳：按 creatingKind 渲染对应创建表单，底部渲染「下一步」CTA。
+// onCreated 由 App 提供：刷新数据 + 按业务流设定 nextCreateAction（链式推进）。
+const createDrawerTitles: Record<CreatingKind, string> = {
+  project: '新建项目',
+  service: '新建服务',
+  version: '新建版本',
+  environment: '新建环境',
+  server: '新建服务器',
+  'server-group': '新建服务器组',
+  'deployment-target': '新建部署目标',
+};
+
+function ProjectForm({ onDone }: { onDone: (project: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   async function submit(values: Entity) {
     setLoading(true);
     try {
-      await apiPost<Entity>('/api/v1/projects', values);
+      const project = await apiPost<Entity>('/api/v1/projects', values);
       form.resetFields();
-      onDone();
+      onDone(project);
     } finally {
       setLoading(false);
     }
@@ -1553,14 +1721,20 @@ function ProjectForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function ServiceForm({ projects, onDone }: { projects: Entity[]; onDone: (service: Entity) => void }) {
+function ServiceForm({ projects, selectedProjectID, onDone }: { projects: Entity[]; selectedProjectID?: string; onDone: (service: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!form.getFieldValue('project_id')) {
+      form.setFieldValue('project_id', selectedProjectID || projects[0]?.id);
+    }
+  }, [form, projects, selectedProjectID]);
   async function submit(values: Entity) {
     setLoading(true);
     try {
       const service = await apiPost<Entity>('/api/v1/services', values);
       form.resetFields();
+      form.setFieldValue('project_id', selectedProjectID || projects[0]?.id);
       onDone(service);
     } finally {
       setLoading(false);
@@ -1587,9 +1761,14 @@ function ServiceForm({ projects, onDone }: { projects: Entity[]; onDone: (servic
   );
 }
 
-function VersionForm({ services, onDone }: { services: Entity[]; onDone: (version: Entity) => void }) {
+function VersionForm({ services, selectedServiceID, onDone }: { services: Entity[]; selectedServiceID?: string; onDone: (version: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!form.getFieldValue('service_id')) {
+      form.setFieldValue('service_id', selectedServiceID || services[0]?.id);
+    }
+  }, [form, selectedServiceID, services]);
   async function submit(values: Entity) {
     setLoading(true);
     try {
@@ -1602,6 +1781,7 @@ function VersionForm({ services, onDone }: { services: Entity[]; onDone: (versio
         metadata: values.metadata || '{}',
       });
       form.resetFields();
+      form.setFieldValue('service_id', selectedServiceID || services[0]?.id);
       onDone(version);
     } finally {
       setLoading(false);
@@ -1662,11 +1842,16 @@ function EnvironmentForm({ onDone }: { onDone: (environment: Entity) => void }) 
   );
 }
 
-function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; credentials: Entity[]; onDone: (server: Entity) => void }) {
+function ServerForm({ servers, credentials, onCredentialsChanged, onDone }: { servers: Entity[]; credentials: Entity[]; onCredentialsChanged?: () => void; onDone: (server: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
+  // 凭据下拉受控：点「+新建凭据」时关闭下拉并打开二级小 Drawer。
+  const [credSelectOpen, setCredSelectOpen] = useState(false);
+  const [credDrawerOpen, setCredDrawerOpen] = useState(false);
+  const [credForm] = Form.useForm();
+  const [credLoading, setCredLoading] = useState(false);
   const authType = Form.useWatch('auth_type', form);
   const role = Form.useWatch('role', form);
   const gateways = servers.filter((server) => server.role === 'gateway' && server.enabled !== false);
@@ -1705,6 +1890,27 @@ function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; crede
       setTesting(false);
     }
   }
+  // 内联新建凭据：提交后刷新凭据列表、回填 credential_ref、关闭二级 Drawer；失败保输入。
+  async function submitCredential() {
+    let values: Entity;
+    try {
+      values = await credForm.validateFields();
+    } catch {
+      return;
+    }
+    setCredLoading(true);
+    try {
+      const credential = await apiPost<Entity>('/api/v1/credentials', values);
+      onCredentialsChanged?.();
+      form.setFieldValue('credential_ref', credential.id);
+      credForm.resetFields();
+      setCredDrawerOpen(false);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存凭据失败');
+    } finally {
+      setCredLoading(false);
+    }
+  }
   return (
     <Form form={form} layout="vertical" initialValues={{ port: 22, auth_type: 'none', role: 'application' }} onFinish={(values) => void submit(values)}>
       <Form.Item name="name" label="名称" rules={[{ required: true }]}>
@@ -1736,7 +1942,21 @@ function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; crede
         label="凭据"
         rules={authType === 'none' ? [] : [{ required: true, message: '请选择凭据' }]}
       >
-        <Select allowClear options={credentials.map(entityOption)} disabled={authType === 'none'} />
+        <Select
+          allowClear
+          open={credSelectOpen}
+          onOpenChange={setCredSelectOpen}
+          options={credentials.map(entityOption)}
+          disabled={authType === 'none'}
+          popupRender={(menu) => (
+            <>
+              {menu}
+              <div className="select-foot-create">
+                <Button size="small" type="link" onClick={() => { setCredSelectOpen(false); setCredDrawerOpen(true); }}>+ 新建凭据</Button>
+              </div>
+            </>
+          )}
+        />
       </Form.Item>
       {role === 'application' ? <Form.Item name="gateway_id" label="跳转网关"><Select allowClear placeholder="不选则直连" options={gateways.map(entityOption)} /></Form.Item> : <Typography.Text type="secondary">网关直接由发布服务连接；应用服务器经它建立隧道后仍使用自己的凭据登录。</Typography.Text>}
       <Space wrap>
@@ -1748,6 +1968,19 @@ function ServerForm({ servers, credentials, onDone }: { servers: Entity[]; crede
         </Button>
       </Space>
       {testResult ? <div className="test-result">{testResult}</div> : null}
+      <Drawer title="新建凭据" open={credDrawerOpen} onClose={() => setCredDrawerOpen(false)} width={360} footer={null} destroyOnClose>
+        <Form form={credForm} layout="vertical" initialValues={{ type: 'private_key' }}>
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="type" label="类型" rules={[{ required: true }]}>
+            <Select options={[{ label: 'private_key', value: 'private_key' }, { label: 'password', value: 'password' }]} />
+          </Form.Item>
+          <Form.Item name="secret" label="Secret" rules={[{ required: true }]}><Input.TextArea rows={6} /></Form.Item>
+          <Space>
+            <Button type="primary" loading={credLoading} onClick={() => void submitCredential()}>保存凭据</Button>
+            <Button onClick={() => setCredDrawerOpen(false)}>取消</Button>
+          </Space>
+        </Form>
+      </Drawer>
     </Form>
   );
 }
@@ -2133,15 +2366,15 @@ function NotificationList({ data, onTest }: { data: Entity[]; onTest: () => void
   );
 }
 
-function CredentialForm({ onDone }: { onDone: () => void }) {
+function CredentialForm({ onDone }: { onDone: (credential: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   async function submit(values: Entity) {
     setLoading(true);
     try {
-      await apiPost<Entity>('/api/v1/credentials', values);
+      const credential = await apiPost<Entity>('/api/v1/credentials', values);
       form.resetFields();
-      onDone();
+      onDone(credential);
     } finally {
       setLoading(false);
     }
