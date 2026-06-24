@@ -24,6 +24,7 @@
 ```text
 Project 1 -- n Service
 Service 1 -- n ServiceVersion
+ServiceVersion 1 -- n ServiceVersionEvent
 Service 1 -- n DeploymentTarget
 Environment 1 -- n DeploymentTarget
 DeploymentTarget n -- n ServerGroup/Server
@@ -133,15 +134,18 @@ NotificationConfig 1 -- n NotificationDelivery
 | `version` | 版本号 |
 | `commit_sha` | commit，可空 |
 | `artifact_url` | 制品地址，可空，展示时脱敏 |
-| `source` | `manual` / `ci` / `api` |
+| `source` | 本期仅 `manual` / `ci`；服务端写入 |
 | `metadata` | JSON 文本 |
 | `created_by_type` / `created_by_id` | 创建来源 |
+| `registration_idempotency_key` | 外部登记幂等键，可空 |
+| `registration_request_hash` | 外部登记请求指纹，可空 |
 | `created_at` | 创建时间 |
 
 约束：
 
 - `(service_id, version)` 唯一。
-- CI 并发注册同一版本时返回已有版本或执行安全 upsert。
+- `(service_id, registration_idempotency_key)` 在幂等键非空时唯一；同 key 同指纹返回已有版本，不同指纹返回冲突。
+- 管理员手动登记重复版本返回冲突，不覆盖历史版本。
 
 ### 4.6 Environment
 
@@ -229,6 +233,7 @@ NotificationConfig 1 -- n NotificationDelivery
 | `script_path` | SSH 脚本路径，可空 |
 | `working_dir` | 工作目录，可空 |
 | `env_vars` | JSON 文本 |
+| `artifact_type` | `version_only` 或 `oci_image` |
 | `timeout_seconds` | 命令超时 |
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
@@ -237,6 +242,7 @@ NotificationConfig 1 -- n NotificationDelivery
 
 - 第一版内置 `mock`、`ssh`。
 - 第一版运行目标只实现服务器和服务器组。
+- `artifact_type=version_only` 允许脚本按版本号解析制品；`artifact_type=oci_image` 要求版本制品为 OCI digest，并由 preflight 阻断缺失或格式不符的制品。
 - `(service_id, environment_id)` 可以有多个部署目标，但创建发布单时必须选择明确目标。
 
 ### 4.10 发布保护
@@ -425,7 +431,26 @@ running -> failed
 - `notification_sent`
 - `notification_failed`
 
-### 4.16 NotificationConfig
+### 4.16 ServiceVersionEvent
+
+用途：服务版本登记与后续版本动作的独立审计；不关联发布单，不复用 `ReleaseEvent`。
+
+关键字段：
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 主键 |
+| `service_version_id` | 服务版本 |
+| `event_type` | `version_registered` 等 |
+| `actor_type` | `user` / `api_key` / `system` |
+| `actor_id` | 主体 ID |
+| `api_key_id` | API Key，可空 |
+| `registration_idempotency_key` | 外部登记幂等键，可空 |
+| `message` | 可读说明 |
+| `metadata` | JSON 文本 |
+| `created_at` | 创建时间 |
+
+### 4.17 NotificationConfig
 
 用途：通知渠道配置。
 
@@ -440,7 +465,7 @@ running -> failed
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
-### 4.17 NotificationDelivery
+### 4.18 NotificationDelivery
 
 用途：通知发送记录。
 

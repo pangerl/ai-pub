@@ -72,6 +72,7 @@ Idempotency-Key: xxx
 - 创建发布单必须支持幂等键。
 - 自动化调用确认、取消、创建回滚等状态变更接口时，也应支持幂等键或等价重复提交保护。
 - 幂等键命中时返回首次请求结果。
+- 外部版本登记必须使用 `Idempotency-Key: {provider}:{run_id}`；幂等范围为服务。相同 key 与相同请求指纹返回首次版本，不同指纹返回 `409 idempotency_conflict`。
 
 ## 4. 鉴权与调用身份
 
@@ -96,6 +97,7 @@ API Key scope：
 | `release:rollback` | 创建回滚发布单 |
 | `deploy:read` | 读取执行状态和服务器日志 |
 | `inventory:read` | 读取项目、服务、版本、环境、服务器和部署目标 |
+| `version:write` | 通过统一外部接口登记服务版本 |
 | `admin:write` | 管理基础配置和高风险配置 |
 
 约束：
@@ -158,7 +160,19 @@ API Key 创建响应只返回一次明文。
 | `GET` | `/services/{id}/versions` | 版本列表 |
 | `POST` | `/services/{id}/versions` | 注册版本 |
 
-### 7.3 环境、服务器和部署目标
+管理员手动登记时服务端强制写入 `source=manual` 与当前用户身份；同一服务重复版本返回 `409 version_conflict`，不覆盖原版本。
+
+### 7.3 外部版本登记
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/version-registrations` | 外部 CI 统一登记版本，需要 `version:write` |
+
+请求体必须包含 `project_key`、`service_key`、`version`；可选包含 `commit_sha`、`artifact_url` 与 JSON 对象 `metadata`。服务端按项目和服务 key 解析内部服务，序列化 metadata，并强制写入 `source=ci` 与 API Key 调用身份。
+
+`artifact_url` 在登记时不按特定制品格式校验。创建发布单时由部署目标 `artifact_type` 决定：`version_only` 缺少制品仅 warning，`oci_image` 缺少制品或不是 OCI digest 时 block。
+
+### 7.4 环境、服务器和部署目标
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -176,6 +190,8 @@ API Key 创建响应只返回一次明文。
 | `GET` | `/deployment-targets` | 部署目标列表 |
 | `POST` | `/deployment-targets` | 创建部署目标 |
 | `PATCH` | `/deployment-targets/{id}` | 更新部署目标 |
+
+部署目标请求和响应包含 `artifact_type`：本期仅支持 `version_only` 与 `oci_image`。该字段必须由管理员显式配置，不能根据 `script_path` 推断。
 
 ## 8. 发布流程 API
 
