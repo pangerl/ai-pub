@@ -73,8 +73,8 @@ harbor.example/team/order-api@sha256:<digest>
 
 | `artifact_type` | 本期语义 | preflight |
 |---|---|---|
-| `version_only` | 脚本根据 `AI_PUB_VERSION` 自行解析制品 | `artifact_url` 缺失仅 warning |
-| `oci_image` | 后端 OCI 镜像部署目标 | `artifact_url` 必须为 OCI digest 引用，否则 block |
+| `version_only` | 脚本根据 `AI_PUB_VERSION` 自行解析制品；非空字段默认值 | `artifact_url` 缺失仅 warning |
+| `oci_image` | 后端 OCI 镜像部署目标 | `artifact_url` 必须匹配 `^[^@]+@sha256:[0-9a-fA-F]{64}$`，否则 block |
 
 新制品类型（如包下载）在出现明确执行需求后再增加；不以当前后端脚本路径作为通用判断依据。
 
@@ -126,7 +126,7 @@ POST /api/v1/version-registrations
 Idempotency-Key: {provider}:{run_id}
 ```
 
-`service_versions` 新增可空 `registration_idempotency_key` 和 `registration_request_hash`，并对 `(service_id, registration_idempotency_key)` 建唯一索引。请求指纹由定位服务后的稳定登记内容计算；CI 可变的重试时间等不影响指纹。
+`service_versions` 新增可空 `registration_idempotency_key` 和 `registration_request_hash`，并对 `(service_id, registration_idempotency_key)` 建唯一索引。请求指纹仅由定位服务后的 `version`、`commit_sha`、`artifact_url` 规范化值计算；metadata、`built_at`、运行链接和其他可变追溯信息不参与指纹。
 
 版本登记的处理规则：
 
@@ -241,7 +241,7 @@ register_release_version:
 - 使用 `docker image prune -a -f` 清理共享主机的全部未运行镜像。
 - 内嵌密码、API token 或其他长期凭据。
 
-当前用户提供、用于服务器部署的脚本（工作区副本为 `scripts/deploy.sh`）仍待替换：它要求位置参数，而执行器注入的是 `AI_PUB_*` 环境变量；同时它自行拼接镜像地址。因此不作为本设计的后端脚本基线，也不在本次文档工作中修改。
+服务器上现有的用户部署脚本仍待替换：它要求位置参数，而执行器注入的是 `AI_PUB_*` 环境变量；同时它自行拼接镜像地址。因此不作为本设计的后端脚本基线，也不在本次文档工作中修改。
 
 ## 6. 版本选择与按目标预检
 
@@ -255,7 +255,7 @@ register_release_version:
 发布前预检新增或收紧以下判断：
 
 - `artifact_type=oci_image` 缺少 `artifact_url` 时阻断，不只给 warning。
-- `artifact_type=oci_image` 的 `artifact_url` 不是 OCI digest 引用时阻断。
+- `artifact_type=oci_image` 的 `artifact_url` 不匹配 `^[^@]+@sha256:[0-9a-fA-F]{64}$` 时阻断。
 - `artifact_type=version_only` 可按脚本契约使用 `version`，不继承 OCI 限制。
 - 服务、版本、部署目标三者不匹配时继续沿用现有阻断。
 - 环境冻结、生产管理员确认、运行中发布冲突继续沿用现有发布门禁。
@@ -276,11 +276,11 @@ register_release_version:
 
 ## 8. 实施顺序与验收
 
-1. MySQL migration：为 `deployment_targets` 增加 `artifact_type`；为 `service_versions` 增加登记幂等键与请求指纹；创建 `service_version_events`。当前运行时仅维护 MySQL migration。
+1. Migration：为 MySQL 运行时增加 `deployment_targets.artifact_type NOT NULL DEFAULT 'version_only'`、服务版本登记幂等字段和 `service_version_events`；同时更新 `migrations/sqlite/` 的同构测试 schema。SQLite 仅用于当前 Go 单测的内存数据库，不构成受支持运行时。
 2. 后端：新增 `version:write` scope，实现通用版本登记接口、服务端来源写入、字段校验、幂等与冲突处理，并写入 `service_version_events`。
 3. 前端：版本列表按服务筛选、搜索与长版本展示；保留手动登记入口，并展示部署目标制品类型。
 4. 服务器：部署专用 `deploy-backend-image.sh` 和受保护环境文件，OCI 部署目标设为 `artifact_type=oci_image` 并配置静态 `env_vars`。
 5. GitLab：在镜像 push 之后加入版本登记 Job，配置受保护变量，作为通用接口的首个接入示例。
-6. 验收：覆盖手动版本登记、外部 CI 版本登记、幂等重试、同 key 请求冲突、同版本冲突、`version_only` warning 与 OCI preflight block；再执行一次真实非生产 OCI 镜像登记、选择、SSH 发布与健康检查。
+6. 验收：覆盖手动版本登记、外部 CI 版本登记、幂等重试、同 key 请求冲突、同版本冲突、`version_only` warning 与 OCI SHA-256 digest preflight block；先运行 `make verify`（SQLite 测试 schema），再运行 `make compose-check`（MySQL 8 空库），最后执行一次真实非生产 OCI 镜像登记、选择、SSH 发布与健康检查。
 
 代码级验证至少包含受影响的 Go 单测、前端 lint/build；涉及 migration、API、Worker 和 SSH 执行路径时，再执行 `make compose-check`。真实 GitLab、Harbor、SSH 服务器属于外部集成，需在非生产环境进行一次专项验收并记录结果。

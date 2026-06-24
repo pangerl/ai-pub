@@ -138,13 +138,13 @@ NotificationConfig 1 -- n NotificationDelivery
 | `metadata` | JSON 文本 |
 | `created_by_type` / `created_by_id` | 创建来源 |
 | `registration_idempotency_key` | 外部登记幂等键，可空 |
-| `registration_request_hash` | 外部登记请求指纹，可空 |
+| `registration_request_hash` | `version`、`commit_sha`、`artifact_url` 规范化值的指纹，可空 |
 | `created_at` | 创建时间 |
 
 约束：
 
 - `(service_id, version)` 唯一。
-- `(service_id, registration_idempotency_key)` 在幂等键非空时唯一；同 key 同指纹返回已有版本，不同指纹返回冲突。
+- `(service_id, registration_idempotency_key)` 在幂等键非空时唯一；指纹排除 metadata、构建时间和运行链接，同 key 同指纹返回已有版本，不同指纹返回冲突。
 - 管理员手动登记重复版本返回冲突，不覆盖历史版本。
 
 ### 4.6 Environment
@@ -233,7 +233,7 @@ NotificationConfig 1 -- n NotificationDelivery
 | `script_path` | SSH 脚本路径，可空 |
 | `working_dir` | 工作目录，可空 |
 | `env_vars` | JSON 文本 |
-| `artifact_type` | `version_only` 或 `oci_image` |
+| `artifact_type` | `version_only` 或 `oci_image`，非空，默认 `version_only` |
 | `timeout_seconds` | 命令超时 |
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |

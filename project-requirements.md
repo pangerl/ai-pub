@@ -353,7 +353,7 @@ prod 当前运行版本：由服务器级部署状态聚合得出
 
 - 同一服务和环境应能唯一解析到一个启用的部署目标，避免发布时歧义。
 - 部署目标包含执行器类型，例如 ssh、mock、webhook、jenkins、kubernetes。
-- 部署目标包含显式 `artifact_type`，用于声明执行时对版本制品的要求；本期取值为 `version_only`（脚本可自行按版本解析）和 `oci_image`（必须使用 OCI digest 制品）。该字段不是从 `script_path` 推断。
+- 部署目标包含显式 `artifact_type`，用于声明执行时对版本制品的要求；本期取值为 `version_only`（脚本可自行按版本解析）和 `oci_image`（必须使用 OCI digest 制品）。字段为非空且默认 `version_only`，保证既有部署目标继续沿用现有脚本行为；该字段不是从 `script_path` 推断。
 - 部署目标包含执行器配置，例如脚本路径、环境变量、Webhook URL、Job 名称、namespace 等。
 - 部署目标包含运行目标，例如服务器、服务器组、K8s namespace、Webhook endpoint 或 Jenkins job。
 - 第一版只实现服务器和服务器组作为运行目标，但模型不应锁死在服务器模式。
@@ -735,7 +735,7 @@ API Key 是自动化调用凭据。
 - `project_key` 对应 `Project.slug`，`service_key` 对应该项目下的 `Service.slug`。二者共同定位服务，避免把非全局唯一的服务 key 当作全局 ID。
 - 项目和服务必须预先由管理员维护；CI 只能登记版本，不自动创建项目或服务。
 - 第一版不维护 repository 实体或 repository 到服务的映射。外部 CI 项目只需配置一次 `AI_PUB_PROJECT_KEY` 受保护变量；单仓多服务 Job 传递自己正在构建的模块 `service_key`。
-- 外部登记必须带 `Idempotency-Key: {provider}:{run_id}`。`service_versions` 保存可空的 `registration_idempotency_key` 与请求指纹，并对 `(service_id, registration_idempotency_key)` 建唯一索引：同服务同 key 且指纹相同返回已有版本 `200`，同 key 指纹不同返回 `409 idempotency_conflict`。
+- 外部登记必须带 `Idempotency-Key: {provider}:{run_id}`。`service_versions` 保存可空的 `registration_idempotency_key` 与请求指纹，并对 `(service_id, registration_idempotency_key)` 建唯一索引。请求指纹只由 `version`、`commit_sha`、`artifact_url` 的规范化值构成，排除 metadata、构建时间和运行链接等可变追溯信息：同服务同 key 且指纹相同返回已有版本 `200`，同 key 指纹不同返回 `409 idempotency_conflict`。
 - 同一服务下版本号必须有数据库唯一约束。不同幂等键登记相同版本时，commit、制品一致返回已有版本，二者不一致返回 `409 version_conflict`，不能覆盖历史版本。
 - 管理员手动登记不使用幂等键；同一服务重复版本一律返回 `409 version_conflict`，不覆盖既有版本。手动与 CI 共用相同的版本唯一性和冲突判断。
 - 外部 CI 在制品准备完成后登记版本，不创建、确认或执行发布单。

@@ -170,7 +170,7 @@ API Key 创建响应只返回一次明文。
 
 请求体必须包含 `project_key`、`service_key`、`version`；可选包含 `commit_sha`、`artifact_url` 与 JSON 对象 `metadata`。服务端按项目和服务 key 解析内部服务，序列化 metadata，并强制写入 `source=ci` 与 API Key 调用身份。
 
-`artifact_url` 在登记时不按特定制品格式校验。创建发布单时由部署目标 `artifact_type` 决定：`version_only` 缺少制品仅 warning，`oci_image` 缺少制品或不是 OCI digest 时 block。
+`artifact_url` 在登记时不按特定制品格式校验。创建发布单时由部署目标 `artifact_type` 决定：`version_only` 缺少制品仅 warning；`oci_image` 缺少制品或不匹配 `^[^@]+@sha256:[0-9a-fA-F]{64}$` 时 block。
 
 ### 7.4 环境、服务器和部署目标
 
@@ -191,7 +191,7 @@ API Key 创建响应只返回一次明文。
 | `POST` | `/deployment-targets` | 创建部署目标 |
 | `PATCH` | `/deployment-targets/{id}` | 更新部署目标 |
 
-部署目标请求和响应包含 `artifact_type`：本期仅支持 `version_only` 与 `oci_image`。该字段必须由管理员显式配置，不能根据 `script_path` 推断。
+部署目标请求和响应包含 `artifact_type`：本期仅支持 `version_only` 与 `oci_image`，缺省时为 `version_only`。该字段必须由管理员显式配置，不能根据 `script_path` 推断。
 
 ## 8. 发布流程 API
 
