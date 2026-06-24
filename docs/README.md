@@ -11,7 +11,7 @@
 5. `DESIGN.md`：前端视觉语言、颜色、排版、组件和页面布局规范。
 6. `engineering-scaffold-design.md`：目录结构、配置、migration、测试和本地 demo。
 7. `notification-design.md`：企业微信机器人 webhook 通知和渠道扩展点。
-8. `gitlab-ci-version-registration-and-backend-deploy-design.md`：GitLab CI 版本登记、后端 OCI 镜像部署脚本与验收边界。
+8. `service-version-registration-and-backend-oci-deploy-design.md`：通用服务版本登记，以及后端 OCI 镜像部署 profile 与 GitLab CI 接入示例。
 9. `development-completion-audit.md`：当前开发完成审查、已验证范围、验收入口和暂缓项。
 
 第一版实现时应始终遵守：

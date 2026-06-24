@@ -273,9 +273,9 @@ Infrastructure
 - 同一服务下版本号唯一。
 - 系统必须保留服务版本历史，不只保存最新版本。
 - 版本属于服务，不属于环境。
-- 版本至少包含版本号、完整 commit SHA、登记时间和来源；CI 只在构建与制品推送成功后登记可发布版本，不同步失败构建状态。
-- 建议保存分支、CI Pipeline 链接、制品链接和元数据。
-- 后端 OCI 镜像版本必须保存可被执行器或部署脚本直接使用的不可变制品引用，例如 `artifact_url=registry/repository@sha256:<digest>`；可读 tag 只作为 `version` 展示，不作为实际部署依据。
+- 版本至少包含版本号、登记时间和来源。手动登记可以只填写版本号；外部 CI 在构建产物可用后按需补充 commit、制品和外部运行信息，不同步失败构建状态。
+- 可选保存 commit SHA、分支、外部构建链接、制品链接和 metadata；平台专属字段不进入 `ServiceVersion` 的通用字段。
+- 制品要求由部署目标决定：后端 OCI 镜像目标要求不可变 digest 形式的 `artifact_url`；包下载或脚本内解析版本等目标可以只依赖版本号或使用其适配的制品形式。
 - 发布单必须选择一个明确版本。
 - 发布单建议保存 `service_version_id`，同时冗余保存版本号文本快照，确保历史审计稳定。
 - 不应物理删除已经被发布单或发布记录引用的版本。
@@ -718,7 +718,7 @@ API Key 是自动化调用凭据。
 流程：
 
 ```text
-GitLab CI 构建并推送镜像成功
+外部 CI 构建产物可用
   -> 调用统一版本登记接口
   -> 系统按 project_key + service_key 解析既有服务
   -> 创建或幂等返回服务版本
@@ -727,16 +727,16 @@ GitLab CI 构建并推送镜像成功
 
 需求：
 
-- 提供统一接口 `POST /api/v1/ci/version-registrations`；所有 GitLab 项目和服务调用同一地址。
-- CI 请求至少包含 `project_key`、`service_key`、`version`、`commit_sha`、OCI digest 形式的 `artifact_url`、Pipeline ID 和 Pipeline URL；可选包含 ref 与构建时间。
+- 提供统一接口 `POST /api/v1/version-registrations`；所有外部 CI 和服务调用同一地址。
+- 外部请求必须包含 `project_key`、`service_key`、`version`；可选包含 `commit_sha`、`artifact_url` 和 metadata。GitLab Pipeline、Jenkins Job、GitHub Actions Run 等平台专属信息写入 metadata，不形成通用必填字段。
 - `project_key` 对应 `Project.slug`，`service_key` 对应该项目下的 `Service.slug`。二者共同定位服务，避免把非全局唯一的服务 key 当作全局 ID。
 - 项目和服务必须预先由管理员维护；CI 只能登记版本，不自动创建项目或服务。
-- 第一版不维护 repository 实体或 repository 到服务的映射。每个 GitLab 仓库只需配置一次 `AI_PUB_PROJECT_KEY` 受保护变量；单仓多服务 Job 传递自己正在构建的模块 `service_key`。
+- 第一版不维护 repository 实体或 repository 到服务的映射。外部 CI 项目只需配置一次 `AI_PUB_PROJECT_KEY` 受保护变量；单仓多服务 Job 传递自己正在构建的模块 `service_key`。
 - 同一服务下版本号必须有数据库唯一约束；CI 重试同一版本且 commit、制品一致时返回已有版本，二者不一致时返回冲突，不能覆盖历史版本。
-- 版本登记发生在镜像 push 成功之后，不创建、确认或执行发布单。
+- 外部 CI 在制品准备完成后登记版本，不创建、确认或执行发布单。
 - 接口必须使用具备 `version:write` scope 的 API Key。即使仅部署在内网也不能省略鉴权：该接口会登记后续可部署的制品；可使用一个 GitLab Group 级受保护 API Key，避免为每个服务维护 Key。
-- GitLab 的 `CI_PROJECT_PATH` 可写入版本 metadata 供审计与跳转，但本期不用于服务定位。
-- 签名校验、IP 白名单、OIDC 与 repository 映射作为后续增强项讨论。
+- 外部系统的 repository 地址或运行链接可写入版本 metadata 供审计与跳转，但本期不用于服务定位。
+- GitLab CI 的 OCI 镜像登记是首个接入示例；其他 CI 复用统一接口，不需要平台专用版本模型。签名校验、IP 白名单、OIDC 与 repository 映射作为后续增强项讨论。
 
 ## 8. 功能模块需求
 
@@ -975,7 +975,7 @@ API 基础约定：
 - 认证 API。
 - 用户管理 API。
 - 项目、服务、服务版本 API。
-- CI 统一版本登记 API。
+- 外部 CI 统一版本登记 API。
 - 环境、基础设施、部署目标 API。
 - 发布单 API。
 - 发布记录和日志 API。
