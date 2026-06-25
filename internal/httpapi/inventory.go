@@ -176,11 +176,35 @@ func createServiceVersion(store repository.Store) http.HandlerFunc {
 			return
 		}
 		input.ServiceID = r.PathValue("id")
+		// 手动登记来源与创建者身份由服务端强制写入，不允许请求体伪造。
+		input.Source = "manual"
+		input.RegistrationIdempotencyKey = ""
+		input.RegistrationRequestHash = ""
+		if user, ok := currentSessionUser(r); ok {
+			input.CreatedByType = "user"
+			input.CreatedByID = user.ID
+		}
+		// 手动登记不使用幂等键：同版本号一律 409，不覆盖已有版本。
+		if _, err := store.FindServiceVersionByServiceAndVersion(r.Context(), input.ServiceID, input.Version); err == nil {
+			writeError(w, r, http.StatusConflict, "version_conflict", errors.New("version already exists"))
+			return
+		} else if !errors.Is(err, repository.ErrNotFound) {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
 		item, err := store.CreateServiceVersion(r.Context(), input)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
 			return
 		}
+		_, _ = store.CreateServiceVersionEvent(r.Context(), domain.ServiceVersionEvent{
+			ServiceVersionID: item.ID,
+			EventType:        "version_registered",
+			ActorType:        "user",
+			ActorID:          item.CreatedByID,
+			Message:          "管理员手动登记版本",
+			Metadata:         item.Metadata,
+		})
 		writeData(w, r, http.StatusCreated, item)
 	}
 }
@@ -701,6 +725,7 @@ var allowedAPIKeyScopes = map[string]bool{
 	"release:confirm":  true,
 	"release:rollback": true,
 	"deploy:read":      true,
+	"version:write":    true,
 	"admin:write":      true,
 }
 

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"ai-pub/internal/domain"
 	"ai-pub/internal/repository"
 )
+
+// ociDigestPattern 校验 OCI 镜像不可变 digest 引用：repo@sha256:<64位十六进制>。
+var ociDigestPattern = regexp.MustCompile(`^[^@]+@sha256:[0-9a-fA-F]{64}$`)
 
 type ReleaseService struct {
 	store    repository.Store
@@ -138,12 +142,23 @@ func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (Pr
 	if conflicts := reservedEnvConflicts(target.EnvVars); len(conflicts) > 0 {
 		result.block("reserved_env_var", "部署目标环境变量不能覆盖系统变量: "+strings.Join(conflicts, ", "))
 	}
-	if version.ArtifactURL == "" {
-		result.Items = append(result.Items, PreflightItem{
-			Code:    "artifact_url_missing",
-			Level:   "warning",
-			Message: "版本未配置制品地址，部署脚本需要自行根据版本号解析制品",
-		})
+	// 制品约束由部署目标的 artifact_type 决定：oci_image 强制要求 digest 引用；
+	// version_only 仅在缺失时给 warning，由脚本按版本号自行解析制品。
+	switch target.ArtifactType {
+	case "oci_image":
+		if version.ArtifactURL == "" {
+			result.block("artifact_url_missing", "OCI 镜像部署目标要求版本必须配置 artifact_url（完整 digest 引用）")
+		} else if !ociDigestPattern.MatchString(version.ArtifactURL) {
+			result.block("artifact_url_invalid", "OCI 镜像部署目标的 artifact_url 必须匹配 `repo@sha256:<64位十六进制>`")
+		}
+	default:
+		if version.ArtifactURL == "" {
+			result.Items = append(result.Items, PreflightItem{
+				Code:    "artifact_url_missing",
+				Level:   "warning",
+				Message: "版本未配置制品地址，部署脚本需要自行根据版本号解析制品",
+			})
+		}
 	}
 	if env.ReleaseFrozen {
 		result.block("environment_frozen", "当前环境已冻结发布")

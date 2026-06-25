@@ -28,16 +28,18 @@ type Service struct {
 }
 
 type ServiceVersion struct {
-	ID            string    `json:"id"`
-	ServiceID     string    `json:"service_id"`
-	Version       string    `json:"version"`
-	CommitSHA     string    `json:"commit_sha"`
-	ArtifactURL   string    `json:"artifact_url"`
-	Source        string    `json:"source"`
-	Metadata      string    `json:"metadata"`
-	CreatedByType string    `json:"created_by_type"`
-	CreatedByID   string    `json:"created_by_id"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                          string    `json:"id"`
+	ServiceID                   string    `json:"service_id"`
+	Version                     string    `json:"version"`
+	CommitSHA                   string    `json:"commit_sha"`
+	ArtifactURL                 string    `json:"artifact_url"`
+	Source                      string    `json:"source"`
+	Metadata                    string    `json:"metadata"`
+	CreatedByType               string    `json:"created_by_type"`
+	CreatedByID                 string    `json:"created_by_id"`
+	RegistrationIdempotencyKey  string    `json:"registration_idempotency_key,omitempty"`
+	RegistrationRequestHash     string    `json:"registration_request_hash,omitempty"`
+	CreatedAt                   time.Time `json:"created_at"`
 }
 
 type Environment struct {
@@ -84,6 +86,7 @@ type DeploymentTarget struct {
 	ExecutorType   string    `json:"executor_type"`
 	TargetType     string    `json:"target_type"`
 	TargetRefID    string    `json:"target_ref_id"`
+	ArtifactType   string    `json:"artifact_type"`
 	ScriptPath     string    `json:"script_path"`
 	WorkingDir     string    `json:"working_dir"`
 	EnvVars        string    `json:"env_vars"`
@@ -205,6 +208,20 @@ type ReleaseEvent struct {
 	Message          string    `json:"message"`
 	Metadata         string    `json:"metadata"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+// ServiceVersionEvent 记录服务版本登记审计事件，独立于 release_events。
+type ServiceVersionEvent struct {
+	ID                         string    `json:"id"`
+	ServiceVersionID           string    `json:"service_version_id"`
+	EventType                  string    `json:"event_type"`
+	ActorType                  string    `json:"actor_type"`
+	ActorID                    string    `json:"actor_id"`
+	APIKeyID                   string    `json:"api_key_id,omitempty"`
+	RegistrationIdempotencyKey string    `json:"registration_idempotency_key,omitempty"`
+	Message                    string    `json:"message"`
+	Metadata                   string    `json:"metadata"`
+	CreatedAt                  time.Time `json:"created_at"`
 }
 
 type NotificationConfig struct {

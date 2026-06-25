@@ -18,7 +18,7 @@ SELECT id, username, display_name, role, enabled, created_at, updated_at FROM us
 
 func (s Store) GetServiceVersion(ctx context.Context, id string) (domain.ServiceVersion, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, service_id, version, commit_sha, artifact_url, source, metadata, created_by_type, created_by_id, created_at
+SELECT id, service_id, version, commit_sha, artifact_url, source, metadata, created_by_type, created_by_id, registration_idempotency_key, registration_request_hash, created_at
 FROM service_versions WHERE id = ?`, id)
 	item, err := scanServiceVersion(row)
 	return item, normalizeNotFound(err)

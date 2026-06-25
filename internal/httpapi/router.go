@@ -71,6 +71,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/notification-configs/{id}", withAdmin(store, deps.Config.JWTSecret, deleteNotificationConfig(notifications)))
 	mux.HandleFunc("POST /api/v1/notification-configs/{id}/test", withAdmin(store, deps.Config.JWTSecret, testNotificationConfig(notifications)))
 	mux.HandleFunc("GET /api/v1/notification-deliveries", withAdmin(store, deps.Config.JWTSecret, listNotificationDeliveries(notifications)))
+	mux.HandleFunc("POST /api/v1/version-registrations", registerVersion(releases, store))
 	mux.HandleFunc("POST /api/v1/release-requests/preflight", preflightRelease(releases, store))
 	mux.HandleFunc("POST /api/v1/release-requests", createRelease(releases, store))
 	mux.HandleFunc("GET /api/v1/release-requests", listReleases(releases, store))

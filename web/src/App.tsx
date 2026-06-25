@@ -849,11 +849,33 @@ export function App() {
                   <div className="selector-grid create-grid">
                     <LabeledSelect label="服务" value={selected.service?.id} options={state.services} nameField="name" onChange={(value) => changeSelection({ serviceID: value, versionID: '', targetID: '' })} />
                     <LabeledSelect label="环境" value={selected.environment?.id} options={state.environments} nameField="name" onChange={(value) => changeSelection({ environmentID: value, targetID: '' })} />
-                    <LabeledSelect label="版本" value={selected.version?.id} options={state.versions} nameField="version" onChange={(value) => changeSelection({ versionID: value })} />
+                    <label className="field-select">
+                      <Typography.Text type="secondary">版本</Typography.Text>
+                      <Select
+                        value={selected.version?.id ? String(selected.version.id) : undefined}
+                        options={state.versions.map((item) => ({ label: String(item.version ?? item.id), value: String(item.id), item }))}
+                        optionFilterProp="label"
+                        showSearch
+                        placeholder="版本"
+                        optionRender={(option) => {
+                          const item = option.data.item as Entity;
+                          return (
+                            <span className="version-option">
+                              <span className="version-option-label">{String(item.version)}</span>
+                              {item.commit_sha ? <small className="version-option-sha">{String(item.commit_sha).slice(0, 8)}</small> : null}
+                              <Tag color={item.source === 'ci' ? 'blue' : 'default'}>{item.source === 'ci' ? 'CI' : '手动'}</Tag>
+                            </span>
+                          );
+                        }}
+                        onChange={(value) => changeSelection({ versionID: String(value) })}
+                      />
+                    </label>
                     <LabeledSelect label="部署目标" value={selected.target?.id} options={selected.targetOptions} nameField="executor_type" onChange={(value) => changeSelection({ targetID: value })} />
                   </div>
                   <div className="release-context">
                     <span>项目 <strong>{selected.project?.name ?? '-'}</strong></span>
+                    <span>版本来源 <strong>{selected.version?.source === 'ci' ? 'CI' : selected.version?.source === 'manual' ? '手动' : '-'}</strong></span>
+                    <span>登记时间 <strong>{selected.version?.created_at ? formatDateTime(selected.version.created_at) : '-'}</strong></span>
                     <span>执行器 <strong>{selected.target?.executor_type ?? '-'}</strong></span>
                     <span>操作身份 <strong>{selected.user?.display_name ?? selected.user?.username ?? '未选择'}</strong></span>
                   </div>
@@ -1423,7 +1445,7 @@ function ServiceDetail({ service, versions, targets, environments, states }: { s
   const environmentIDs = new Set(serviceTargets.map((item) => String(item.environment_id)));
   const availableEnvironments = environments.filter((item) => environmentIDs.has(String(item.id)));
   const serviceStates = states.filter((item) => String(item.service_id) === String(service.id));
-  return <div className="service-detail-grid"><div><span className="mono-label">服务</span><h3>{service.name}</h3><p>{service.description || '暂无描述'}</p><KeyValueGrid values={[["可用环境", availableEnvironments.length], ["部署目标", serviceTargets.length], ["历史版本", versions.length], ["服务器当前版本", serviceStates.length]]} /></div><div><span className="mono-label">可用环境</span><div className="detail-chip-list">{availableEnvironments.length ? availableEnvironments.map((item) => <span className={item.is_production ? 'detail-chip production' : 'detail-chip'} key={String(item.id)}>{item.name}{item.is_production ? ' · 生产' : ''}</span>) : <span className="detail-muted">尚未配置部署目标</span>}</div><span className="mono-label">部署目标</span><div className="detail-list">{serviceTargets.map((item) => <div key={String(item.id)}><strong>{item.executor_type} / {item.target_type}</strong><small>{`${environments.find((environment) => String(environment.id) === String(item.environment_id))?.name ?? item.environment_id} · ${item.enabled === false ? '已停用' : '已启用'}`}</small></div>)}</div></div><div><span className="mono-label">最近版本</span><div className="detail-list">{versions.length ? versions.slice(0, 6).map((item) => <div key={String(item.id)}><strong>{item.version}</strong><small>{`${item.commit_sha || '无 commit'} · ${maskArtifactURL(item.artifact_url)}`}</small></div>) : <span className="detail-muted">暂无版本</span>}</div></div></div>;
+  return <div className="service-detail-grid"><div><span className="mono-label">服务</span><h3>{service.name}</h3><p>{service.description || '暂无描述'}</p><KeyValueGrid values={[["可用环境", availableEnvironments.length], ["部署目标", serviceTargets.length], ["历史版本", versions.length], ["服务器当前版本", serviceStates.length]]} /></div><div><span className="mono-label">可用环境</span><div className="detail-chip-list">{availableEnvironments.length ? availableEnvironments.map((item) => <span className={item.is_production ? 'detail-chip production' : 'detail-chip'} key={String(item.id)}>{item.name}{item.is_production ? ' · 生产' : ''}</span>) : <span className="detail-muted">尚未配置部署目标</span>}</div><span className="mono-label">部署目标</span><div className="detail-list">{serviceTargets.map((item) => <div key={String(item.id)}><strong>{item.executor_type} / {item.target_type}</strong><small>{`${environments.find((environment) => String(environment.id) === String(item.environment_id))?.name ?? item.environment_id} · ${item.enabled === false ? '已停用' : '已启用'}`}</small></div>)}</div></div><div><span className="mono-label">最近版本</span><div className="detail-list">{versions.length ? versions.slice(0, 6).map((item) => { const runURL = versionRunURL(item.metadata); return <div key={String(item.id)}><strong>{item.version}</strong><Tag color={item.source === 'ci' ? 'blue' : 'default'}>{item.source === 'ci' ? 'CI' : '手动'}</Tag><small>{`${item.commit_sha ? String(item.commit_sha).slice(0, 8) : '无 commit'} · ${maskArtifactURL(item.artifact_url)}`}</small>{runURL ? <a className="detail-link" href={runURL} target="_blank" rel="noreferrer">外部运行</a> : null}</div>; }) : <span className="detail-muted">暂无版本</span>}</div></div></div>;
 }
 
 function maskArtifactURL(value: Entity[string]) {
@@ -1434,6 +1456,19 @@ function maskArtifactURL(value: Entity[string]) {
     return `${url.origin}${url.pathname}${url.search ? '?…' : ''}`;
   } catch {
     return raw.length > 48 ? `${raw.slice(0, 45)}…` : raw;
+  }
+}
+
+// 安全解析版本 metadata，取出外部运行链接；解析失败返回空串。
+function versionRunURL(metadata: Entity[string]): string {
+  const raw = String(metadata ?? '');
+  if (!raw) return '';
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const runURL = parsed?.run_url;
+    return typeof runURL === 'string' ? runURL : '';
+  } catch {
+    return '';
   }
 }
 
@@ -1676,6 +1711,7 @@ function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers
         <Form.Item name="target_type" label="目标类型"><Select options={[{ label: '服务器', value: 'server' }, { label: '服务器组', value: 'server_group' }]} /></Form.Item>
         <Form.Item name="target_ref_id" label="运行目标"><Select options={targetOptions.map(entityOption)} /></Form.Item>
         <Form.Item name="executor_type" label="执行器"><Select options={[{ label: 'mock', value: 'mock' }, { label: 'ssh', value: 'ssh' }]} /></Form.Item>
+        <Form.Item name="artifact_type" label="制品类型" tooltip="oci_image 要求版本 artifact_url 为完整 digest 引用；version_only 由脚本按版本号自行解析"><Select options={[{ label: 'version_only（按版本号解析）', value: 'version_only' }, { label: 'oci_image（OCI 镜像 digest）', value: 'oci_image' }]} /></Form.Item>
         <Form.Item name="script_path" label="Script Path"><Input /></Form.Item>
         <Form.Item name="working_dir" label="Working Dir"><Input /></Form.Item>
         <Form.Item name="env_vars" label="环境变量 JSON"><Input.TextArea rows={3} /></Form.Item>
@@ -2108,7 +2144,7 @@ function DeploymentTargetForm({
     <Form
       form={form}
       layout="vertical"
-      initialValues={{ executor_type: 'mock', target_type: 'server', env_vars: '{}', timeout_seconds: 60 }}
+      initialValues={{ executor_type: 'mock', target_type: 'server', artifact_type: 'version_only', env_vars: '{}', timeout_seconds: 60 }}
       onFinish={(values) => void submit(values)}
     >
       <Form.Item name="service_id" label="服务" rules={[{ required: true }]}>
@@ -2134,6 +2170,14 @@ function DeploymentTargetForm({
           options={[
             { label: 'mock', value: 'mock' },
             { label: 'ssh', value: 'ssh' },
+          ]}
+        />
+      </Form.Item>
+      <Form.Item name="artifact_type" label="制品类型" tooltip="oci_image 要求版本 artifact_url 为完整 digest 引用；version_only 由脚本按版本号自行解析">
+        <Select
+          options={[
+            { label: 'version_only（按版本号解析）', value: 'version_only' },
+            { label: 'oci_image（OCI 镜像 digest）', value: 'oci_image' },
           ]}
         />
       </Form.Item>
@@ -2867,6 +2911,7 @@ const API_KEY_SCOPE_OPTIONS: Array<{ label: string; value: string }> = [
   { label: '确认发布（release:confirm）', value: 'release:confirm' },
   { label: '回滚发布（release:rollback）', value: 'release:rollback' },
   { label: '读取部署（deploy:read）', value: 'deploy:read' },
+  { label: '登记版本（version:write）', value: 'version:write' },
   { label: '管理写（admin:write）', value: 'admin:write' },
 ];
 

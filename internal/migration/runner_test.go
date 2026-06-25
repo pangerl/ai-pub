@@ -21,8 +21,8 @@ func TestSQLiteMigrationRunnerAppliesInitialSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Applied) != 12 {
-		t.Fatalf("expected 12 applied migrations, got %d", len(report.Applied))
+	if len(report.Applied) != 13 {
+		t.Fatalf("expected 13 applied migrations, got %d", len(report.Applied))
 	}
 
 	assertForeignKeyTarget(t, db, "release_events", "deploy_record_id", "deploy_records")
@@ -77,8 +77,8 @@ func TestMySQLMigrationRunnerCanReadMigrationSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Pending) != 11 {
-		t.Fatalf("expected 11 pending mysql migrations, got %d", len(report.Pending))
+	if len(report.Pending) != 12 {
+		t.Fatalf("expected 12 pending mysql migrations, got %d", len(report.Pending))
 	}
 }
 

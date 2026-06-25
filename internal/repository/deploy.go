@@ -468,7 +468,7 @@ func (s Store) RollbackCandidates(ctx context.Context, releaseID string) ([]doma
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT sv.id, sv.service_id, sv.version, sv.commit_sha, sv.artifact_url, sv.source, sv.metadata, sv.created_by_type, sv.created_by_id, sv.created_at
+SELECT sv.id, sv.service_id, sv.version, sv.commit_sha, sv.artifact_url, sv.source, sv.metadata, sv.created_by_type, sv.created_by_id, sv.registration_idempotency_key, sv.registration_request_hash, sv.created_at
 FROM release_requests rr
 JOIN deploy_records dr ON dr.release_request_id = rr.id
 JOIN service_versions sv ON sv.id = rr.service_version_id

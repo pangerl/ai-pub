@@ -162,15 +162,15 @@ func (s Store) CreateServiceVersion(ctx context.Context, item domain.ServiceVers
 	}
 	item.CreatedAt = nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO service_versions (id, service_id, version, commit_sha, artifact_url, source, metadata, created_by_type, created_by_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.ServiceID, item.Version, item.CommitSHA, item.ArtifactURL, item.Source, item.Metadata, item.CreatedByType, item.CreatedByID, formatTime(item.CreatedAt))
+INSERT INTO service_versions (id, service_id, version, commit_sha, artifact_url, source, metadata, created_by_type, created_by_id, registration_idempotency_key, registration_request_hash, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.ServiceID, item.Version, item.CommitSHA, item.ArtifactURL, item.Source, item.Metadata, item.CreatedByType, item.CreatedByID, nullString(item.RegistrationIdempotencyKey), nullString(item.RegistrationRequestHash), formatTime(item.CreatedAt))
 	return item, err
 }
 
 func (s Store) ListServiceVersions(ctx context.Context, serviceID string) ([]domain.ServiceVersion, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, service_id, version, commit_sha, artifact_url, source, metadata, created_by_type, created_by_id, created_at
+SELECT id, service_id, version, commit_sha, artifact_url, source, metadata, created_by_type, created_by_id, registration_idempotency_key, registration_request_hash, created_at
 FROM service_versions WHERE service_id = ? ORDER BY created_at DESC, id DESC`, serviceID)
 	if err != nil {
 		return nil, err
@@ -505,19 +505,22 @@ func (s Store) CreateDeploymentTarget(ctx context.Context, item domain.Deploymen
 	if item.EnvVars == "" {
 		item.EnvVars = "{}"
 	}
+	if item.ArtifactType == "" {
+		item.ArtifactType = "version_only"
+	}
 	item.Enabled = true
 	item.CreatedAt = now
 	item.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO deployment_targets (id, service_id, environment_id, executor_type, target_type, target_ref_id, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.ServiceID, item.EnvironmentID, item.ExecutorType, item.TargetType, item.TargetRefID, item.ScriptPath, item.WorkingDir, item.EnvVars, item.TimeoutSeconds, boolInt(item.Enabled), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+INSERT INTO deployment_targets (id, service_id, environment_id, executor_type, target_type, target_ref_id, artifact_type, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.ServiceID, item.EnvironmentID, item.ExecutorType, item.TargetType, item.TargetRefID, item.ArtifactType, item.ScriptPath, item.WorkingDir, item.EnvVars, item.TimeoutSeconds, boolInt(item.Enabled), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
 	return item, err
 }
 
 func (s Store) ListDeploymentTargets(ctx context.Context, serviceID string, environmentID string) ([]domain.DeploymentTarget, error) {
 	query := `
-SELECT id, service_id, environment_id, executor_type, target_type, target_ref_id, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at
+SELECT id, service_id, environment_id, executor_type, target_type, target_ref_id, artifact_type, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at
 FROM deployment_targets`
 	var clauses []string
 	var args []any
@@ -551,7 +554,7 @@ FROM deployment_targets`
 
 func (s Store) GetDeploymentTarget(ctx context.Context, id string) (domain.DeploymentTarget, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, service_id, environment_id, executor_type, target_type, target_ref_id, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at
+SELECT id, service_id, environment_id, executor_type, target_type, target_ref_id, artifact_type, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at
 FROM deployment_targets WHERE id = ?`, id)
 	item, err := scanDeploymentTarget(row)
 	return item, normalizeNotFound(err)
@@ -565,6 +568,7 @@ func (s Store) UpdateDeploymentTarget(ctx context.Context, id string, item domai
 	existing.ExecutorType = choose(item.ExecutorType, existing.ExecutorType)
 	existing.TargetType = choose(item.TargetType, existing.TargetType)
 	existing.TargetRefID = choose(item.TargetRefID, existing.TargetRefID)
+	existing.ArtifactType = choose(item.ArtifactType, existing.ArtifactType)
 	existing.ScriptPath = item.ScriptPath
 	existing.WorkingDir = item.WorkingDir
 	existing.EnvVars = choose(item.EnvVars, existing.EnvVars)
@@ -575,9 +579,9 @@ func (s Store) UpdateDeploymentTarget(ctx context.Context, id string, item domai
 	existing.UpdatedAt = nowUTC()
 	_, err = s.db.ExecContext(ctx, `
 UPDATE deployment_targets
-SET executor_type = ?, target_type = ?, target_ref_id = ?, script_path = ?, working_dir = ?, env_vars = ?, timeout_seconds = ?, enabled = ?, updated_at = ?
+SET executor_type = ?, target_type = ?, target_ref_id = ?, artifact_type = ?, script_path = ?, working_dir = ?, env_vars = ?, timeout_seconds = ?, enabled = ?, updated_at = ?
 WHERE id = ?`,
-		existing.ExecutorType, existing.TargetType, existing.TargetRefID, existing.ScriptPath, existing.WorkingDir, existing.EnvVars, existing.TimeoutSeconds, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
+		existing.ExecutorType, existing.TargetType, existing.TargetRefID, existing.ArtifactType, existing.ScriptPath, existing.WorkingDir, existing.EnvVars, existing.TimeoutSeconds, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
 	return existing, err
 }
 
@@ -822,7 +826,10 @@ func scanService(row rowScanner) (domain.Service, error) {
 func scanServiceVersion(row rowScanner) (domain.ServiceVersion, error) {
 	var item domain.ServiceVersion
 	var createdAt string
-	err := row.Scan(&item.ID, &item.ServiceID, &item.Version, &item.CommitSHA, &item.ArtifactURL, &item.Source, &item.Metadata, &item.CreatedByType, &item.CreatedByID, &createdAt)
+	var idempotencyKey, requestHash sql.NullString
+	err := row.Scan(&item.ID, &item.ServiceID, &item.Version, &item.CommitSHA, &item.ArtifactURL, &item.Source, &item.Metadata, &item.CreatedByType, &item.CreatedByID, &idempotencyKey, &requestHash, &createdAt)
+	item.RegistrationIdempotencyKey = nullStringValue(idempotencyKey)
+	item.RegistrationRequestHash = nullStringValue(requestHash)
 	item.CreatedAt = parseTime(createdAt)
 	return item, err
 }
@@ -870,7 +877,7 @@ func scanDeploymentTarget(row rowScanner) (domain.DeploymentTarget, error) {
 	var item domain.DeploymentTarget
 	var enabled int
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.ServiceID, &item.EnvironmentID, &item.ExecutorType, &item.TargetType, &item.TargetRefID, &item.ScriptPath, &item.WorkingDir, &item.EnvVars, &item.TimeoutSeconds, &enabled, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.ServiceID, &item.EnvironmentID, &item.ExecutorType, &item.TargetType, &item.TargetRefID, &item.ArtifactType, &item.ScriptPath, &item.WorkingDir, &item.EnvVars, &item.TimeoutSeconds, &enabled, &createdAt, &updatedAt)
 	item.Enabled = enabled == 1
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
