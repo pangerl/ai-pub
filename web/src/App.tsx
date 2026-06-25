@@ -1109,13 +1109,13 @@ export function App() {
               </div>
               <Drawer title={mgmtCreatingKind ? mgmtCreateTitles[mgmtCreatingKind] : ''} open={mgmtCreatingKind !== null} onClose={() => setMgmtCreatingKind(null)} width={520} footer={null} destroyOnClose>
                 {mgmtCreatingKind === 'user' ? <UserForm onDone={(user) => { refreshWithSelection({ userID: String(user.id ?? '') }); void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
-                {mgmtCreatingKind === 'api-key' ? <APIKeyForm users={state.users} onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
+                {mgmtCreatingKind === 'api-key' ? <APIKeyForm users={state.users} onCreated={() => { void refreshAll(); }} /> : null}
                 {mgmtCreatingKind === 'notification' ? <NotificationForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
                 {mgmtCreatingKind === 'credential' ? <CredentialForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
               </Drawer>
             </section>
           </> : null}
-          {page === 'api-keys' ? <><PageHeading eyebrow="PERSONAL ACCESS" title="个人访问密钥" description="为 CI/CD 或本地脚本创建受 scope 限制的访问凭证。" /><section className="surface access-key-brief"><div><span className="mono-label">使用边界</span><h2>密钥只在创建时显示一次。</h2><p>请立即保存到受保护的 CI/CD 变量中。禁用或删除后，使用它的调用会立刻失效。</p></div><div className="access-key-facts"><span><b>{state.apiKeys.length}</b> 已创建</span><span><b>{state.apiKeys.filter((item) => item.enabled !== false).length}</b> 已启用</span><span>密钥归属当前登录用户</span></div></section><section className="access-key-layout"><div className="access-key-workspace"><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setApiKeyCreating(true)}>新建访问密钥</Button></div><section className="surface access-key-inventory"><SectionTitle title="我的访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section><section className="surface access-key-guide"><span className="mono-label">最小权限</span><h2>只授予调用真正需要的 scopes。</h2><p>发布创建、确认、回滚和读取日志分别对应不同 scope；生产发布依然受管理员确认约束。</p></section></div></section><Drawer title="新建访问密钥" open={apiKeyCreating} onClose={() => setApiKeyCreating(false)} width={520} footer={null} destroyOnClose><APIKeyForm users={[]} ownKey onDone={() => { void refreshAll(); setApiKeyCreating(false); }} /></Drawer></> : null}
+          {page === 'api-keys' ? <><PageHeading eyebrow="PERSONAL ACCESS" title="个人访问密钥" description="为 CI/CD 或本地脚本创建受 scope 限制的访问凭证。" /><section className="surface access-key-brief"><div><span className="mono-label">使用边界</span><h2>密钥只在创建时显示一次。</h2><p>请立即保存到受保护的 CI/CD 变量中。禁用或删除后，使用它的调用会立刻失效。</p></div><div className="access-key-facts"><span><b>{state.apiKeys.length}</b> 已创建</span><span><b>{state.apiKeys.filter((item) => item.enabled !== false).length}</b> 已启用</span><span>密钥归属当前登录用户</span></div></section><section className="access-key-layout"><div className="access-key-workspace"><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setApiKeyCreating(true)}>新建访问密钥</Button></div><section className="surface access-key-inventory"><SectionTitle title="我的访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section><section className="surface access-key-guide"><span className="mono-label">最小权限</span><h2>只授予调用真正需要的 scopes。</h2><p>发布创建、确认、回滚和读取日志分别对应不同 scope；生产发布依然受管理员确认约束。</p></section></div></section><Drawer title="新建访问密钥" open={apiKeyCreating} onClose={() => setApiKeyCreating(false)} width={520} footer={null} destroyOnClose><APIKeyForm users={[]} ownKey onCreated={() => { void refreshAll(); }} /></Drawer></> : null}
         </main>
       </div>
     </ConfigProvider>
@@ -2613,7 +2613,7 @@ function NotificationDeliveryList({ data, configs }: { data: Entity[]; configs: 
   );
 }
 
-function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone: () => void; ownKey?: boolean }) {
+function APIKeyForm({ users, onCreated, ownKey = false }: { users: Entity[]; onCreated: () => void; ownKey?: boolean }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [plaintext, setPlaintext] = useState('');
@@ -2627,7 +2627,8 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
       });
       setPlaintext(body.plaintext);
       form.resetFields();
-      onDone();
+      // 创建成功后只刷新列表，不关闭抽屉：明文必须留在页面上供用户保存。
+      onCreated();
     } finally {
       setLoading(false);
     }
@@ -2647,6 +2648,7 @@ function APIKeyForm({ users, onDone, ownKey = false }: { users: Entity[]; onDone
         layout="vertical"
         initialValues={{ scopes: ['release:create', 'release:confirm'] }}
         onFinish={(values) => void submit(values)}
+        hidden={plaintext !== ''}
       >
         <Form.Item name="name" label="名称" rules={[{ required: true }]}>
           <Input />
