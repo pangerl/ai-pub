@@ -367,7 +367,9 @@ export function App() {
       running: state.releases.filter(
         (item) => item.status === 'running' && currentUserID !== '' && String(item.created_by_id) === currentUserID,
       ),
-      failed: state.releases.filter((item) => item.status === 'failed' || item.status === 'partial').slice(0, 5),
+      failed: state.releases.filter(
+        (item) => currentUserID !== '' && String(item.created_by_id) === currentUserID && (item.status === 'failed' || item.status === 'partial'),
+      ).slice(0, 5),
     };
   }, [selected.user?.id, selected.user?.role, state.releases]);
 
@@ -820,14 +822,14 @@ export function App() {
 
           {page === 'workbench' ? (
             <>
-              <PageHeading eyebrow="RELEASE OPERATIONS" title={needsSetup ? '准备首个发布' : '发布工作台'} description={needsSetup ? '完成以下最小配置后，即可创建并执行发布。' : '从需要你处理的发布开始。'} action={<Button type="primary" onClick={() => setPage(needsSetup ? 'configuration' : 'create')}>{needsSetup ? '进入配置中心' : '创建发布单'}</Button>} />
+              <PageHeading eyebrow="RELEASE OPERATIONS" title={needsSetup ? '准备首个发布' : '发布工作台'} description={needsSetup ? '完成以下最小配置后，即可创建并执行发布。' : '从需要你处理的发布开始。'} action={<Button type="primary" onClick={() => setPage(needsSetup ? 'configuration' : 'releases')}>{needsSetup ? '进入配置中心' : '进入发布中心'}</Button>} />
               {needsSetup ? <SetupChecklist steps={setupSteps} onOpen={(key) => { setInfrastructureView(key); setPage('configuration'); }} /> : null}
               <section className="workbench-tasks">
                 <SectionTitle title="需要处理的发布" meta="MY RELEASE WORK" />
                 <div className="content-grid three-up">
                 <TaskList title="待我确认" data={workbenchReleases.pending} state={state} empty="暂无待确认发布" onOpen={(item) => void selectRelease(item)} />
                 <TaskList title="我发起的运行中" data={workbenchReleases.running} state={state} empty="暂无运行中发布" onOpen={(item) => void selectRelease(item)} />
-                <TaskList title="最近失败" data={workbenchReleases.failed} state={state} empty="暂无失败发布" onOpen={(item) => void selectRelease(item)} />
+                <TaskList title="我发起的最近失败" data={workbenchReleases.failed} state={state} empty="暂无失败发布" onOpen={(item) => void selectRelease(item)} />
                 </div>
               </section>
             </>
