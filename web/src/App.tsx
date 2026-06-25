@@ -578,8 +578,7 @@ export function App() {
         created_by_id: selected.user.id,
         idempotency_key: `web-${Date.now()}`,
       });
-      setActiveRelease(body.release);
-      await refreshAll(body.release.id as string);
+      await selectRelease(body.release);
       api.success(`发布单已创建：${body.next_action}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '发布单创建失败');
@@ -686,10 +685,7 @@ export function App() {
         created_by_type: 'user',
         created_by_id: userID,
       });
-      const nextSelection = selectionFromRelease(body.release, selection);
-      setActiveRelease(body.release);
-      setSelection(nextSelection);
-      await refreshAll(body.release.id as string, nextSelection);
+      await selectRelease(body.release);
       api.success('回滚发布单已创建');
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建回滚失败');
@@ -707,10 +703,7 @@ export function App() {
     setLoading(true);
     try {
       const body = await apiPost<ReleaseResponse>(`/api/v1/release-requests/${releaseID}/retry`, { idempotency_key: `web-retry-${Date.now()}` });
-      const nextSelection = selectionFromRelease(body.release, selection);
-      setActiveRelease(body.release);
-      setSelection(nextSelection);
-      await refreshAll(body.release.id as string, nextSelection);
+      await selectRelease(body.release);
       api.success('重新发布单已创建，请按预检结果继续确认');
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建重新发布单失败');
