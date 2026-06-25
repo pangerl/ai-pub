@@ -68,7 +68,25 @@ curl -X POST http://127.0.0.1:18080/api/v1/release-requests \
   -d '{"service_id":"...","environment_id":"...","service_version_id":"...","deployment_target_id":"..."}'
 ```
 
-API Key 读取项目、服务、环境、服务器和部署目标需要 `inventory:read`；读取发布单、事件和回滚候选需要 `release:read`；发布前 preflight 和创建发布单需要 `release:create`。已有发布单 preflight 需要 `release:read` 并会再次写入 `preflight_checked` 事件；确认、驳回、取消发布单需要 `release:confirm`，且 API Key 只能操作自身创建的非生产发布，生产确认必须使用管理员会话。创建回滚单需要 `release:rollback`，读取部署记录和服务器日志需要 `deploy:read`，管理基础配置、API Key、凭据和通知需要 `admin:write`；管理员通过 `PATCH /environments/{id}` 设置环境 `release_frozen`。scope 仅接受已定义枚举，不支持 `*` 或未知值；普通用户不能授予 `admin:write`，更新时只能缩小 scope 集合。用户禁用后不能确认发布；通过 API Key 发起的发布动作事件以 `api_key` 作为 actor 并记录 `api_key_id`；禁用、过期或 scope 不足会被拒绝。
+## 外部 CI 版本登记本地验证
+
+外部 CI 在镜像/制品构建成功后调用统一接口登记版本，服务端强制写入 `source=ci` 与调用方 API Key 身份。接口与字段定义见 [服务版本登记与后端 OCI 镜像发布设计](./service-version-registration-and-backend-oci-deploy-design.md)，本地验证可直接使用调试脚本：
+
+```bash
+AI_PUB_API_KEY=<version:write 密钥> \
+AI_PUB_PROJECT_KEY=food-supply \
+AI_PUB_SERVICE_KEY=order-api \
+AI_PUB_VERSION=2026.06.23-1842 \
+AI_PUB_COMMIT_SHA=7f3c6b5b \
+AI_PUB_ARTIFACT_URL=harbor.example/team/order-api@sha256:<digest> \
+./scripts/register-version.sh
+```
+
+脚本默认 `AI_PUB_BASE_URL=http://127.0.0.1:18080`，经 `web` 反代 `/api/` 到容器内 `api:8080`；`api` 容器不直接映射端口。`project_key`、`service_key`、`version` 必填，服务须由管理员预先创建，接口不接收 `service_id` 也不自动创建实体。登记接口不校验 `artifact_url` 格式，OCI digest 校验发生在创建发布单时的 preflight。
+
+验证幂等与冲突：固定 `AI_PUB_IDEMPOTENCY_KEY=local:foo` 连跑两次，第二次返回 `200` 且版本与首次一致；同幂等键改 `AI_PUB_VERSION` 或 `AI_PUB_ARTIFACT_URL` 返回 `409 idempotency_conflict`；换幂等键但用同一版本号加不同 commit/制品返回 `409 version_conflict`。首次登记返回 `201`，非 2xx 时脚本输出 `error.code`、`error.message` 与 `request_id` 并以非零退出。
+
+API Key 读取项目、服务、环境、服务器和部署目标需要 `inventory:read`；读取发布单、事件和回滚候选需要 `release:read`；发布前 preflight 和创建发布单需要 `release:create`。已有发布单 preflight 需要 `release:read` 并会再次写入 `preflight_checked` 事件；确认、驳回、取消发布单需要 `release:confirm`，且 API Key 只能操作自身创建的非生产发布，生产确认必须使用管理员会话。创建回滚单需要 `release:rollback`，读取部署记录和服务器日志需要 `deploy:read`，管理基础配置、API Key、凭据和通知需要 `admin:write`；通过外部接口登记服务版本需要 `version:write`，它只能登记版本，不可创建服务、修改部署目标或执行发布；管理员通过 `PATCH /environments/{id}` 设置环境 `release_frozen`。scope 仅接受已定义枚举，不支持 `*` 或未知值；普通用户不能授予 `admin:write`，更新时只能缩小 scope 集合。用户禁用后不能确认发布；通过 API Key 发起的发布动作事件以 `api_key` 作为 actor 并记录 `api_key_id`；禁用、过期或 scope 不足会被拒绝。
 
 通知链路的本地验证以 `go test ./internal/app ./internal/httpapi ./internal/e2e` 为准，覆盖通知配置创建、启用/禁用、发送记录、生产待管理员确认通知、发布失败通知触发入口、回滚申请通知触发入口，以及通知发送成功/失败写入发布事件流。
 
