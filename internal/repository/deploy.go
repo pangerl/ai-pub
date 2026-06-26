@@ -6,10 +6,39 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"ai-pub/internal/domain"
 )
+
+// DeployListFilter 描述发布记录列表的服务端筛选与分页条件。空字段表示不限制。
+// service_id/environment_id 需通过 JOIN release_requests 过滤（deploy_records 无此列）。
+type DeployListFilter struct {
+	ReleaseRequestID string
+	ServiceID        string
+	EnvironmentID    string
+	Status           string // 逗号分隔多值
+	Page             int
+	PageSize         int
+}
+
+// DeployRecordListItem 在 DeployRecord 基础上附带父发布单的关键字段，
+// 使前端无需再维护 releaseByID Map 即可展示执行上下文。
+type DeployRecordListItem struct {
+	domain.DeployRecord
+	ReleaseServiceID        string `json:"release_service_id"`
+	ReleaseEnvironmentID    string `json:"release_environment_id"`
+	ReleaseServiceVersionID string `json:"release_service_version_id"`
+}
+
+// PagedDeploys 是分页发布记录列表的响应结构。
+type PagedDeploys struct {
+	Items    []DeployRecordListItem `json:"items"`
+	Total    int                    `json:"total"`
+	Page     int                    `json:"page"`
+	PageSize int                    `json:"page_size"`
+}
 
 type ClaimedDeploy struct {
 	Release domain.ReleaseRequest
@@ -402,24 +431,75 @@ FROM deploy_records WHERE id = ?`, id)
 	return item, normalizeNotFound(err)
 }
 
-func (s Store) ListDeployRecords(ctx context.Context) ([]domain.DeployRecord, error) {
+func (s Store) ListDeployRecords(ctx context.Context, filter DeployListFilter) (PagedDeploys, error) {
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 {
+		filter.PageSize = 50
+	}
+
+	// 始终 LEFT JOIN release_requests：既用于 service/env 筛选，也用于响应附带父发布单上下文。
+	// JOIN 模式参照 ClaimNextDeploy。
+	var clauses []string
+	var args []any
+	if filter.ReleaseRequestID != "" {
+		clauses = append(clauses, "dr.release_request_id = ?")
+		args = append(args, filter.ReleaseRequestID)
+	}
+	if filter.ServiceID != "" {
+		clauses = append(clauses, "rr.service_id = ?")
+		args = append(args, filter.ServiceID)
+	}
+	if filter.EnvironmentID != "" {
+		clauses = append(clauses, "rr.environment_id = ?")
+		args = append(args, filter.EnvironmentID)
+	}
+	if filter.Status != "" {
+		statuses := strings.Split(filter.Status, ",")
+		placeholders := make([]string, len(statuses))
+		for i, st := range statuses {
+			placeholders[i] = "?"
+			args = append(args, strings.TrimSpace(st))
+		}
+		clauses = append(clauses, "dr.status IN ("+strings.Join(placeholders, ", ")+")")
+	}
+
+	where := ""
+	if len(clauses) > 0 {
+		where = " WHERE " + strings.Join(clauses, " AND ")
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, release_request_id, status, executor_type, target_snapshot, total_servers, success_servers, failed_servers,
-skipped_servers, worker_id, created_at, updated_at
-FROM deploy_records ORDER BY created_at DESC, id DESC`)
+SELECT dr.id, dr.release_request_id, dr.status, dr.executor_type, dr.target_snapshot, dr.total_servers, dr.success_servers,
+dr.failed_servers, dr.skipped_servers, dr.worker_id, dr.created_at, dr.updated_at,
+rr.service_id AS release_service_id, rr.environment_id AS release_environment_id, rr.service_version_id AS release_service_version_id
+FROM deploy_records dr LEFT JOIN release_requests rr ON rr.id = dr.release_request_id`+where+`
+ORDER BY dr.created_at DESC, dr.id DESC
+LIMIT ? OFFSET ?`,
+		append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)...)
 	if err != nil {
-		return nil, err
+		return PagedDeploys{}, err
 	}
 	defer rows.Close()
-	items := []domain.DeployRecord{}
+	items := []DeployRecordListItem{}
 	for rows.Next() {
-		item, err := scanDeployRecord(rows)
+		item, err := scanDeployRecordListItem(rows)
 		if err != nil {
-			return nil, err
+			return PagedDeploys{}, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return PagedDeploys{}, err
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_records dr LEFT JOIN release_requests rr ON rr.id = dr.release_request_id`+where, args...).Scan(&total); err != nil {
+		return PagedDeploys{}, err
+	}
+
+	return PagedDeploys{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
 }
 
 func (s Store) ListServerDeployLogs(ctx context.Context, deployRecordID string) ([]domain.ServerDeployLog, error) {
@@ -527,6 +607,22 @@ func scanDeployRecord(row rowScanner) (domain.DeployRecord, error) {
 		&item.SuccessServers, &item.FailedServers, &item.SkippedServers, &item.WorkerID, &createdAt, &updatedAt)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
+	return item, err
+}
+
+// scanDeployRecordListItem 扫描 12 列 deploy_record + 3 列父发布单上下文（LEFT JOIN 可能为 NULL）。
+func scanDeployRecordListItem(row rowScanner) (DeployRecordListItem, error) {
+	var item DeployRecordListItem
+	var createdAt, updatedAt string
+	var serviceID, environmentID, serviceVersionID sql.NullString
+	err := row.Scan(&item.ID, &item.ReleaseRequestID, &item.Status, &item.ExecutorType, &item.TargetSnapshot, &item.TotalServers,
+		&item.SuccessServers, &item.FailedServers, &item.SkippedServers, &item.WorkerID, &createdAt, &updatedAt,
+		&serviceID, &environmentID, &serviceVersionID)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	item.ReleaseServiceID = nullStringValue(serviceID)
+	item.ReleaseEnvironmentID = nullStringValue(environmentID)
+	item.ReleaseServiceVersionID = nullStringValue(serviceVersionID)
 	return item, err
 }
 

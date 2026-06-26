@@ -11,12 +11,21 @@ func listDeployRecords(store repository.Store) http.HandlerFunc {
 		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
 			return
 		}
-		items, err := store.ListDeployRecords(r.Context())
+		q := r.URL.Query()
+		filter := repository.DeployListFilter{
+			ReleaseRequestID: q.Get("release_request_id"),
+			ServiceID:        q.Get("service_id"),
+			EnvironmentID:    q.Get("environment_id"),
+			Status:           q.Get("status"),
+			Page:             parseIntDefault(q.Get("page"), 1),
+			PageSize:         parseIntDefault(q.Get("page_size"), 50),
+		}
+		result, err := store.ListDeployRecords(r.Context(), filter)
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 			return
 		}
-		writeData(w, r, http.StatusOK, items)
+		writeData(w, r, http.StatusOK, result)
 	}
 }
 

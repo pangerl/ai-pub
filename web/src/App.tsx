@@ -6,6 +6,7 @@ import {
   Drawer,
   Form,
   Input,
+  Pagination,
   Popconfirm,
   Select,
   Space,
@@ -68,8 +69,6 @@ type AppState = {
   users: Entity[];
   apiKeys: Entity[];
   credentials: Entity[];
-  releases: Entity[];
-  deploys: Entity[];
   events: Entity[];
   serverLogs: Entity[];
   states: Entity[];
@@ -78,18 +77,38 @@ type AppState = {
   ops: Entity | null;
 };
 
+// 服务端分页列表响应结构（与后端 {items,total,page,page_size} 对齐）。
+type PagedList<T> = { items: T[]; total: number; page: number; page_size: number };
+
+// 创建发布单 / 发布详情展示上下文：允许 fallback 到第一个可用对象。
+// user 不进此结构，统一来自登录态 currentUser。
 type Selection = {
   serviceID: string;
   environmentID: string;
   versionID: string;
   targetID: string;
-  userID: string;
 };
 
-type ListFilters = {
-  scoped: boolean;
-  releaseStatus: string;
-  deployStatus: string;
+// 发布中心列表筛选：空 serviceID/environmentID/projectID 表示全部，禁止 fallback。
+type ReleaseListFilters = {
+  view: ReleaseView;
+  projectID: string;
+  serviceID: string;
+  environmentID: string;
+  status: string;
+  source: string;
+  timeRange: string;
+  query: string;
+  page: number;
+};
+
+// 发布记录列表筛选：空字段表示全部；releaseRequestID 优先级高于 service/environment。
+type DeployListFilters = {
+  releaseRequestID: string;
+  serviceID: string;
+  environmentID: string;
+  status: string;
+  page: number;
 };
 
 type ManualTargetRef = {
@@ -127,26 +146,133 @@ type ManagementCreatingKind = 'user' | 'api-key' | 'notification' | 'credential'
 type AppRoute = {
   page: Page;
   releaseID?: string;
+  // 当前 URL 的 query 参数；发布中心与发布记录页都从这里读取筛选。
+  search: URLSearchParams;
 };
 
 function routeFromLocation(): AppRoute {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  const search = new URLSearchParams(window.location.search);
   const releaseMatch = path.match(/^\/releases\/([^/]+)$/);
-  if (releaseMatch && releaseMatch[1] !== 'new') return { page: 'release-detail', releaseID: decodeURIComponent(releaseMatch[1]) };
+  if (releaseMatch && releaseMatch[1] !== 'new') return { page: 'release-detail', releaseID: decodeURIComponent(releaseMatch[1]), search };
   switch (path) {
-    case '/releases/new': return { page: 'create' };
-    case '/releases': return { page: 'releases' };
-    case '/deploys': return { page: 'deploys' };
-    case '/configuration': return { page: 'configuration' };
-    case '/management': return { page: 'management' };
-    case '/access-keys': return { page: 'api-keys' };
-    default: return { page: 'workbench' };
+    case '/releases/new': return { page: 'create', search };
+    case '/releases': return { page: 'releases', search };
+    case '/deploys': return { page: 'deploys', search };
+    case '/configuration': return { page: 'configuration', search };
+    case '/management': return { page: 'management', search };
+    case '/access-keys': return { page: 'api-keys', search };
+    default: return { page: 'workbench', search };
   }
 }
 
 function pathForPage(page: Page, releaseID?: string) {
   if (page === 'release-detail' && releaseID) return `/releases/${encodeURIComponent(releaseID)}`;
   return ({ workbench: '/', create: '/releases/new', releases: '/releases', deploys: '/deploys', configuration: '/configuration', management: '/management', 'api-keys': '/access-keys', 'release-detail': '/releases' } as Record<Page, string>)[page];
+}
+
+// 构造带 query 的 URL；query 中空值会被忽略，避免产生噪声参数。
+function buildPath(page: Page, releaseID?: string, query?: Record<string, string>) {
+  const base = pathForPage(page, releaseID);
+  if (!query) {
+    return base;
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value) {
+      params.set(key, value);
+    }
+  }
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
+// 发布中心筛选 <-> URL query 互转。空/默认值不写回 URL，保持链接干净。
+const RELEASE_FILTER_DEFAULTS: ReleaseListFilters = { view: 'all', projectID: '', serviceID: '', environmentID: '', status: 'all', source: 'all', timeRange: 'all', query: '', page: 1 };
+
+function releaseListFiltersFromSearch(search: URLSearchParams): ReleaseListFilters {
+  return {
+    view: releaseViewFromValue(search.get('view')) ?? RELEASE_FILTER_DEFAULTS.view,
+    projectID: search.get('project_id') ?? '',
+    serviceID: search.get('service_id') ?? '',
+    environmentID: search.get('environment_id') ?? '',
+    status: search.get('status') ?? 'all',
+    source: search.get('source') ?? 'all',
+    timeRange: search.get('time_range') ?? 'all',
+    query: search.get('q') ?? '',
+    page: parseIntDefault(search.get('page'), 1),
+  };
+}
+
+function releaseListFiltersToQuery(filters: ReleaseListFilters): Record<string, string> {
+  const query: Record<string, string> = {};
+  if (filters.view !== RELEASE_FILTER_DEFAULTS.view) query['view'] = filters.view;
+  if (filters.projectID) query['project_id'] = filters.projectID;
+  if (filters.serviceID) query['service_id'] = filters.serviceID;
+  if (filters.environmentID) query['environment_id'] = filters.environmentID;
+  if (filters.status !== 'all') query['status'] = filters.status;
+  if (filters.source !== 'all') query['source'] = filters.source;
+  if (filters.timeRange !== 'all') query['time_range'] = filters.timeRange;
+  if (filters.query) query['q'] = filters.query;
+  if (filters.page > 1) query['page'] = String(filters.page);
+  return query;
+}
+
+function releaseListFiltersEqual(a: ReleaseListFilters, b: ReleaseListFilters) {
+  return (
+    a.view === b.view &&
+    a.projectID === b.projectID &&
+    a.serviceID === b.serviceID &&
+    a.environmentID === b.environmentID &&
+    a.status === b.status &&
+    a.source === b.source &&
+    a.timeRange === b.timeRange &&
+    a.query === b.query &&
+    a.page === b.page
+  );
+}
+
+// 发布记录筛选 <-> URL query 互转。
+
+function deployListFiltersFromSearch(search: URLSearchParams): DeployListFilters {
+  return {
+    releaseRequestID: search.get('release_request_id') ?? '',
+    serviceID: search.get('service_id') ?? '',
+    environmentID: search.get('environment_id') ?? '',
+    status: search.get('status') ?? 'all',
+    page: parseIntDefault(search.get('page'), 1),
+  };
+}
+
+function deployListFiltersToQuery(filters: DeployListFilters): Record<string, string> {
+  const query: Record<string, string> = {};
+  if (filters.releaseRequestID) query['release_request_id'] = filters.releaseRequestID;
+  if (filters.serviceID) query['service_id'] = filters.serviceID;
+  if (filters.environmentID) query['environment_id'] = filters.environmentID;
+  if (filters.status !== 'all') query['status'] = filters.status;
+  if (filters.page > 1) query['page'] = String(filters.page);
+  return query;
+}
+
+function deployListFiltersEqual(a: DeployListFilters, b: DeployListFilters) {
+  return a.releaseRequestID === b.releaseRequestID && a.serviceID === b.serviceID && a.environmentID === b.environmentID && a.status === b.status && a.page === b.page;
+}
+
+// URL query 整数解析：空/非法回退默认值，用于 page 等分页参数。
+function parseIntDefault(value: string | null, fallback: number) {
+  if (!value) {
+    return fallback;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+// 校验 view 参数合法性，非法值回退到默认（避免脏 URL 破坏类型）。
+function releaseViewFromValue(value: string | null): ReleaseView | undefined {
+  if (value === 'pending' || value === 'mine' || value === 'all') {
+    return value;
+  }
+  return undefined;
 }
 
 const emptyState: AppState = {
@@ -160,8 +286,6 @@ const emptyState: AppState = {
   users: [],
   apiKeys: [],
   credentials: [],
-  releases: [],
-  deploys: [],
   events: [],
   serverLogs: [],
   states: [],
@@ -194,24 +318,38 @@ const deployStatusOptions = [
 
 const releaseTerminalStatuses = new Set(['success', 'failed', 'partial', 'rejected', 'cancelled']);
 
+// 发布来源下拉：对齐 release_requests 表 CHECK 约束（web/api/ci/ai_agent），不再依赖列表数据动态提取。
+const releaseSourceOptions = [
+  { label: '全部来源', value: 'all' },
+  { label: 'web', value: 'web' },
+  { label: 'api', value: 'api' },
+  { label: 'ci', value: 'ci' },
+  { label: 'ai_agent', value: 'ai_agent' },
+];
+
 export function App() {
   const [api, contextHolder] = message.useMessage();
   const [state, setState] = useState<AppState>(emptyState);
   const [health, setHealth] = useState<Entity | null>(null);
   const [activeRelease, setActiveRelease] = useState<Entity | null>(null);
   const [activeDeployID, setActiveDeployID] = useState('');
-  const [selection, setSelection] = useState<Selection>({ serviceID: '', environmentID: '', versionID: '', targetID: '', userID: '' });
-  const [filters, setFilters] = useState<ListFilters>({ scoped: true, releaseStatus: 'all', deployStatus: 'all' });
+  const [selection, setSelection] = useState<Selection>({ serviceID: '', environmentID: '', versionID: '', targetID: '' });
+  const [releaseListFilters, setReleaseListFilters] = useState<ReleaseListFilters>(() => releaseListFiltersFromSearch(routeFromLocation().search));
+  const [deployListFilters, setDeployListFilters] = useState<DeployListFilters>(() => deployListFiltersFromSearch(routeFromLocation().search));
+  // 发布中心/发布记录列表分页数据，独立于全量 AppState，随 page/filter 请求服务端。
+  const [releaseListData, setReleaseListData] = useState<PagedList<Entity>>({ items: [], total: 0, page: 1, page_size: 50 });
+  const [deployListData, setDeployListData] = useState<PagedList<Entity>>({ items: [], total: 0, page: 1, page_size: 50 });
+  // 工作台与详情页的上下文数据：定向查询替代全量列表，避免与分页冲突。
+  const [workbenchSlice, setWorkbenchSlice] = useState<Entity[]>([]);
+  const [activeReleaseDeploys, setActiveReleaseDeploys] = useState<Entity[]>([]);
+  const [activeDeploy, setActiveDeploy] = useState<Entity | null>(null);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [page, setPageState] = useState<Page>(() => routeFromLocation().page);
   const [routeReleaseID, setRouteReleaseID] = useState<string | undefined>(() => routeFromLocation().releaseID);
-  const [releaseView, setReleaseView] = useState<ReleaseView>('all');
-  const [releaseQuery, setReleaseQuery] = useState('');
-  const [releaseSource, setReleaseSource] = useState('all');
-  const [releaseTimeRange, setReleaseTimeRange] = useState('all');
-  const [releaseFilterNow, setReleaseFilterNow] = useState(0);
+  // 当前 URL 的 query 快照；发布中心与发布记录页的筛选都从这里还原。
+  const [routeSearch, setRouteSearch] = useState<URLSearchParams>(() => routeFromLocation().search);
   const [infrastructureView, setInfrastructureView] = useState<InfrastructureView>('overview');
   const [managementView, setManagementView] = useState<ManagementView>('overview');
   // 系统页创建抽屉：mgmtCreatingKind 标记正在创建的实体类型，独立于配置页状态机。
@@ -287,11 +425,12 @@ export function App() {
   const [authReady, setAuthReady] = useState(false);
   const activeReleaseID = activeRelease?.id as string | undefined;
 
-  const setPage = useCallback((next: Page, releaseID?: string) => {
+  const setPage = useCallback((next: Page, releaseID?: string, query?: Record<string, string>) => {
     const nextReleaseID = next === 'release-detail' ? releaseID : undefined;
     setPageState(next);
     setRouteReleaseID(nextReleaseID);
-    window.history.pushState(null, '', pathForPage(next, nextReleaseID));
+    setRouteSearch(new URLSearchParams(query ?? {}));
+    window.history.pushState(null, '', buildPath(next, nextReleaseID, query));
   }, []);
 
   const selected = useMemo(() => {
@@ -312,66 +451,42 @@ export function App() {
       targetRef,
       target,
       targetOptions,
-      user: currentUser ?? findByID(state.users, selection.userID) ?? state.users[0],
+      user: currentUser ?? state.users[0],
       release: activeRelease,
     };
   }, [activeRelease, currentUser, selection, state]);
 
-  const releaseByID = useMemo(() => {
-    const byID = new Map<string, Entity>();
-    for (const release of state.releases) {
-      if (release.id) {
-        byID.set(String(release.id), release);
-      }
+  // 发布记录页筛选提示：仅在存在上下文（发布单/服务/环境）时生成文案，用于提示条展示。
+  const deployFilterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (deployListFilters.releaseRequestID) {
+      parts.push(`发布单 ${shortID(deployListFilters.releaseRequestID)}`);
     }
-    return byID;
-  }, [state.releases]);
+    if (deployListFilters.serviceID) {
+      parts.push(`服务 ${namedRef(findByID(state.services, deployListFilters.serviceID), deployListFilters.serviceID, 'name')}`);
+    }
+    if (deployListFilters.environmentID) {
+      parts.push(`环境 ${namedRef(findByID(state.environments, deployListFilters.environmentID), deployListFilters.environmentID, 'name')}`);
+    }
+    return parts.length > 0 ? `正在查看按 ${parts.join(' / ')} 筛选的记录` : '';
+  }, [deployListFilters.environmentID, deployListFilters.releaseRequestID, deployListFilters.serviceID, state.environments, state.services]);
 
-  const filteredDeploys = useMemo(
-    () =>
-      state.deploys.filter((item) => {
-        const statusMatched = filters.deployStatus === 'all' || item.status === filters.deployStatus;
-        const release = releaseByID.get(String(item.release_request_id ?? ''));
-        const scopeMatched = !filters.scoped || releaseMatchesSelection(release, selected.service?.id, selected.environment?.id);
-        return statusMatched && scopeMatched;
-      }),
-    [filters.deployStatus, filters.scoped, releaseByID, selected.environment?.id, selected.service?.id, state.deploys],
-  );
-
-  const visibleReleases = useMemo(() => {
-    return state.releases.filter((item) => {
-      const statusMatched = filters.releaseStatus === 'all' || item.status === filters.releaseStatus;
-      const serviceMatched = !selection.serviceID || String(item.service_id) === selection.serviceID;
-      const environmentMatched = !selection.environmentID || String(item.environment_id) === selection.environmentID;
-      const currentUserID = String(selected.user?.id ?? '');
-      const viewMatched =
-        releaseView === 'all' ||
-        (releaseView === 'mine' && currentUserID !== '' && String(item.created_by_id) === currentUserID) ||
-        (releaseView === 'pending' && item.status === 'pending_confirm');
-      const sourceMatched = releaseSource === 'all' || item.source === releaseSource;
-      const query = releaseQuery.trim().toLowerCase();
-      const queryMatched = !query || [item.id, item.source, item.created_by_id, formatActor(item.created_by_type, item.created_by_id, state)].some((value) => String(value ?? '').toLowerCase().includes(query));
-      const ageHours = releaseTimeRange === 'all' ? Infinity : Number(releaseTimeRange);
-      const createdAt = new Date(String(item.created_at ?? '')).getTime();
-      const timeMatched = !Number.isFinite(createdAt) || releaseFilterNow === 0 || releaseFilterNow - createdAt <= ageHours * 60 * 60 * 1000;
-      return statusMatched && serviceMatched && environmentMatched && viewMatched && sourceMatched && queryMatched && timeMatched;
-    });
-  }, [filters.releaseStatus, releaseFilterNow, releaseQuery, releaseSource, releaseTimeRange, releaseView, selected.user?.id, selection.environmentID, selection.serviceID, state]);
-
+  // 工作台分桶：从定向查询拿到的 workbenchSlice 按状态/归属分到 pending/running/failed。
+  // workbenchSlice 由 refreshAll 中发起的定向请求填充（见 fetchWorkbenchSlice）。
   const workbenchReleases = useMemo(() => {
-    const currentUserID = String(selected.user?.id ?? '');
+    const currentUserID = String(currentUser?.id ?? '');
     return {
-      pending: state.releases.filter(
-        (item) => item.status === 'pending_confirm' && (selected.user?.role === 'admin' || (currentUserID !== '' && String(item.created_by_id) === currentUserID)),
+      pending: workbenchSlice.filter(
+        (item) => item.status === 'pending_confirm' && (currentUser?.role === 'admin' || (currentUserID !== '' && String(item.created_by_id) === currentUserID)),
       ),
-      running: state.releases.filter(
+      running: workbenchSlice.filter(
         (item) => item.status === 'running' && currentUserID !== '' && String(item.created_by_id) === currentUserID,
       ),
-      failed: state.releases.filter(
+      failed: workbenchSlice.filter(
         (item) => currentUserID !== '' && String(item.created_by_id) === currentUserID && (item.status === 'failed' || item.status === 'partial'),
       ).slice(0, 5),
     };
-  }, [selected.user?.id, selected.user?.role, state.releases]);
+  }, [currentUser?.id, currentUser?.role, workbenchSlice]);
 
   const setupSteps = useMemo(() => [
     { key: 'application', label: '定义应用', detail: '创建项目、服务和至少一个版本。', complete: state.projects.length > 0 && state.services.length > 0 && state.versions.length > 0 },
@@ -379,6 +494,28 @@ export function App() {
     { key: 'targeting', label: '建立部署连接', detail: '创建可启用的部署目标。', complete: state.targets.some((item) => item.enabled !== false) },
   ] as const, [state.environments.length, state.projects.length, state.servers.length, state.services.length, state.targets, state.versions.length]);
   const needsSetup = currentUser?.role === 'admin' && setupSteps.some((step) => !step.complete);
+
+  // 工作台上下文用定向查询替代全量列表：admin 多看全量待确认，其余只看自己的进行中/失败。
+  // 后端 status 支持逗号分隔多值；前端拿到后按状态分桶到 pending/running/failed。
+  const fetchWorkbenchSlice = useCallback(async (user: Entity | null): Promise<Entity[]> => {
+    if (!user?.id) {
+      return [];
+    }
+    const me = String(user.id);
+    try {
+      if (user.role === 'admin') {
+        const [pending, mine] = await Promise.all([
+          apiGet<PagedList<Entity>>('/api/v1/release-requests?status=pending_confirm&page_size=20'),
+          apiGet<PagedList<Entity>>(`/api/v1/release-requests?created_by_id=${encodeURIComponent(me)}&status=running,failed,partial&page_size=10`),
+        ]);
+        return [...pending.items, ...mine.items];
+      }
+      const result = await apiGet<PagedList<Entity>>(`/api/v1/release-requests?created_by_id=${encodeURIComponent(me)}&status=pending_confirm,running,failed,partial&page_size=30`);
+      return result.items;
+    } catch {
+      return [];
+    }
+  }, []);
 
   const refreshAll = useCallback(async (preferredReleaseID?: string | null, preferredSelection?: Partial<Selection>) => {
     setError('');
@@ -394,8 +531,6 @@ export function App() {
         users,
         apiKeys,
         credentials,
-        releases,
-        deploys,
         states,
         notificationConfigs,
         notificationDeliveries,
@@ -411,8 +546,6 @@ export function App() {
         apiGet<Entity[]>('/api/v1/users'),
         apiGet<Entity[]>('/api/v1/api-keys'),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/credentials') : Promise.resolve([]),
-        apiGet<Entity[]>('/api/v1/release-requests'),
-        apiGet<Entity[]>('/api/v1/deploy-records'),
         apiGet<Entity[]>('/api/v1/server-deployment-states'),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/notification-configs') : Promise.resolve([]),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/notification-deliveries') : Promise.resolve([]),
@@ -420,15 +553,22 @@ export function App() {
       ]);
       const serviceID = preferredSelection?.serviceID || selection.serviceID || (services[0]?.id as string | undefined);
       const versions = serviceID ? await apiGet<Entity[]>(`/api/v1/services/${serviceID}/versions`) : [];
+      // 单条 release 与其关联 deploy 记录改用定向查询，不再依赖全量列表。
       const releaseID = preferredReleaseID === null ? undefined : ((preferredReleaseID ?? activeReleaseID) as string | undefined);
-      const refreshedActiveRelease = releaseID ? findByID(releases, releaseID) : null;
+      const [refreshedActiveRelease, activeDeploys, workbenchItems] = await Promise.all([
+        releaseID ? apiGet<Entity>(`/api/v1/release-requests/${releaseID}`) : Promise.resolve(null),
+        releaseID ? apiGet<PagedList<Entity>>(`/api/v1/deploy-records?release_request_id=${encodeURIComponent(releaseID)}&page_size=50`).then((p) => p.items) : Promise.resolve([] as Entity[]),
+        fetchWorkbenchSlice(currentUser),
+      ]);
       const events = releaseID ? await apiGet<Entity[]>(`/api/v1/release-requests/${releaseID}/events`) : [];
       const currentDeployID = activeDeployID || undefined;
       const serverLogs = currentDeployID ? await apiGet<Entity[]>(`/api/v1/deploy-records/${currentDeployID}/server-logs`) : [];
       setHealth(healthBody);
       if (releaseID) {
-        setActiveRelease(refreshedActiveRelease ?? null);
+        setActiveRelease(refreshedActiveRelease);
+        setActiveReleaseDeploys(activeDeploys);
       }
+      setWorkbenchSlice(workbenchItems);
       setState({
         projects,
         services,
@@ -440,8 +580,6 @@ export function App() {
         users,
         apiKeys,
         credentials,
-        releases,
-        deploys,
         events,
         serverLogs,
         states,
@@ -452,7 +590,7 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
     }
-  }, [activeDeployID, activeReleaseID, currentUser, selection.serviceID]);
+  }, [activeDeployID, activeReleaseID, currentUser, fetchWorkbenchSlice, selection.serviceID]);
 
   const refreshWithSelection = useCallback(
     (patch: Partial<Selection>) => {
@@ -472,23 +610,137 @@ export function App() {
     setSelection((current) => ({ ...current, ...patch }));
   }, []);
 
-  const changeReleaseFilters = useCallback((patch: Partial<ListFilters>) => {
+  const changeReleaseFilters = useCallback((patch: Partial<ReleaseListFilters>) => {
     setActiveRelease(null);
     setState((current) => ({ ...current, events: [] }));
-    setFilters((current) => ({ ...current, ...patch }));
+    setReleaseListFilters((current) => {
+      const next = { ...current, ...patch, page: 1 };
+      const query = releaseListFiltersToQuery(next);
+      setRouteSearch(new URLSearchParams(query));
+      window.history.replaceState(null, '', buildPath('releases', undefined, query));
+      return next;
+    });
   }, []);
 
-  const changeDeployFilters = useCallback((patch: Partial<ListFilters>) => {
+  const changeDeployFilters = useCallback((patch: Partial<DeployListFilters>) => {
     setActiveDeployID('');
     setState((current) => ({ ...current, serverLogs: [] }));
-    setFilters((current) => ({ ...current, ...patch }));
+    setDeployListFilters((current) => {
+      const next = { ...current, ...patch, page: 1 };
+      const query = deployListFiltersToQuery(next);
+      setRouteSearch(new URLSearchParams(query));
+      window.history.replaceState(null, '', buildPath('deploys', undefined, query));
+      return next;
+    });
   }, []);
+
+  // 进入发布记录页：从发布中心进入时看全部记录；从发布详情进入时按当前发布单过滤。
+  // 重置筛选为默认全部，再按上下文填入 release_request_id；URL 同步由 setPage 处理。
+  const goToDeploys = useCallback((releaseRequestID?: string) => {
+    setDeployListFilters({ releaseRequestID: releaseRequestID ?? '', serviceID: '', environmentID: '', status: 'all', page: 1 });
+    setPage('deploys', undefined, releaseRequestID ? { release_request_id: releaseRequestID } : undefined);
+  }, [setPage]);
+
+  // 切页：只改 page、写 URL、触发请求；不重置其他筛选。
+  const changeReleasePage = useCallback((p: number) => {
+    setReleaseListFilters((current) => {
+      const next = { ...current, page: p };
+      const query = releaseListFiltersToQuery(next);
+      setRouteSearch(new URLSearchParams(query));
+      window.history.replaceState(null, '', buildPath('releases', undefined, query));
+      return next;
+    });
+  }, []);
+
+  const changeDeployPage = useCallback((p: number) => {
+    setDeployListFilters((current) => {
+      const next = { ...current, page: p };
+      const query = deployListFiltersToQuery(next);
+      setRouteSearch(new URLSearchParams(query));
+      window.history.replaceState(null, '', buildPath('deploys', undefined, query));
+      return next;
+    });
+  }, []);
+
+  // 发布中心列表请求：page/filter → URLSearchParams → apiGet。
+  // view=mine 翻译为 created_by_id=currentUser.id；view=pending 覆盖 status。
+  const refreshReleaseList = useCallback(async () => {
+    if (page !== 'releases') {
+      return;
+    }
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(releaseListFilters.page));
+      params.set('page_size', '50');
+      if (releaseListFilters.view === 'mine') {
+        params.set('created_by_id', String(currentUser?.id ?? ''));
+      }
+      if (releaseListFilters.view === 'pending') {
+        params.set('status', 'pending_confirm');
+      } else if (releaseListFilters.status !== 'all') {
+        params.set('status', releaseListFilters.status);
+      }
+      if (releaseListFilters.projectID) {
+        params.set('project_id', releaseListFilters.projectID);
+      }
+      if (releaseListFilters.serviceID) {
+        params.set('service_id', releaseListFilters.serviceID);
+      }
+      if (releaseListFilters.environmentID) {
+        params.set('environment_id', releaseListFilters.environmentID);
+      }
+      if (releaseListFilters.source !== 'all') {
+        params.set('source', releaseListFilters.source);
+      }
+      if (releaseListFilters.timeRange !== 'all') {
+        params.set('time_range', releaseListFilters.timeRange);
+      }
+      if (releaseListFilters.query.trim()) {
+        params.set('q', releaseListFilters.query.trim());
+      }
+      const result = await apiGet<PagedList<Entity>>(`/api/v1/release-requests?${params}`);
+      setReleaseListData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载失败');
+    }
+  }, [page, releaseListFilters, currentUser?.id]);
+
+  // 发布记录列表请求。
+  const refreshDeployList = useCallback(async () => {
+    if (page !== 'deploys') {
+      return;
+    }
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(deployListFilters.page));
+      params.set('page_size', '50');
+      if (deployListFilters.releaseRequestID) {
+        params.set('release_request_id', deployListFilters.releaseRequestID);
+      }
+      if (deployListFilters.serviceID) {
+        params.set('service_id', deployListFilters.serviceID);
+      }
+      if (deployListFilters.environmentID) {
+        params.set('environment_id', deployListFilters.environmentID);
+      }
+      if (deployListFilters.status !== 'all') {
+        params.set('status', deployListFilters.status);
+      }
+      const result = await apiGet<PagedList<Entity>>(`/api/v1/deploy-records?${params}`);
+      setDeployListData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载失败');
+    }
+  }, [page, deployListFilters]);
+
+  // 列表请求 effect：filter/page 变化时自动拉取，复用 routeSearch 同步机制防循环。
+  useEffect(() => { void refreshReleaseList(); }, [refreshReleaseList]);
+  useEffect(() => { void refreshDeployList(); }, [refreshDeployList]);
 
   useEffect(() => {
     void apiGet<Entity>('/api/v1/auth/me')
       .then((user) => {
         setCurrentUser(user);
-        setSelection((current) => ({ ...current, userID: String(user.id ?? '') }));
       })
       .catch(() => setCurrentUser(null))
       .finally(() => setAuthReady(true));
@@ -499,14 +751,34 @@ export function App() {
       const route = routeFromLocation();
       setPageState(route.page);
       setRouteReleaseID(route.releaseID);
+      setRouteSearch(route.search);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  // 发布中心：从 URL 还原筛选状态（刷新、浏览器返回/前进、直接访问链接时）。
+  // 仅在路由 query 变化时同步；页面内改筛选会反向写回 URL，避免循环。
+  useEffect(() => {
+    if (page !== 'releases') {
+      return;
+    }
+    const next = releaseListFiltersFromSearch(routeSearch);
+    setReleaseListFilters((current) => (releaseListFiltersEqual(current, next) ? current : next));
+  }, [page, routeSearch]);
+
+  // 发布记录页：从 URL 还原筛选状态（同上）。
+  useEffect(() => {
+    if (page !== 'deploys') {
+      return;
+    }
+    const next = deployListFiltersFromSearch(routeSearch);
+    setDeployListFilters((current) => (deployListFiltersEqual(current, next) ? current : next));
+  }, [page, routeSearch]);
+
   useEffect(() => {
     if (currentUser) {
-      void refreshAll(null, { userID: String(currentUser.id ?? '') });
+      void refreshAll();
     }
   }, [currentUser, refreshAll]);
 
@@ -520,17 +792,20 @@ export function App() {
     if (page !== 'release-detail' || !routeReleaseID || !currentUser || activeReleaseID === routeReleaseID) {
       return;
     }
-    const release = findByID(state.releases, routeReleaseID);
-    if (!release) {
-      return;
-    }
-    const nextSelection = selectionFromRelease(release, selection);
-    setActiveRelease(release);
-    setSelection(nextSelection);
-    void refreshAll(routeReleaseID, nextSelection);
-    void apiPost<PreflightResult>(`/api/v1/release-requests/${routeReleaseID}/preflight`, {}).then(setPreflight).catch(() => setPreflight(null));
-  }, [activeReleaseID, currentUser, page, refreshAll, routeReleaseID, selection, state.releases]);
+    // URL 直达详情：直接 GET 单条 release，不再依赖全量列表里命中。
+    void apiGet<Entity>(`/api/v1/release-requests/${routeReleaseID}`)
+      .then((release) => {
+        const nextSelection = selectionFromRelease(release, selection);
+        setActiveRelease(release);
+        setSelection(nextSelection);
+        void refreshAll(routeReleaseID, nextSelection);
+        void apiPost<PreflightResult>(`/api/v1/release-requests/${routeReleaseID}/preflight`, {}).then(setPreflight).catch(() => setPreflight(null));
+      })
+      .catch(() => { /* 单条拉取失败时交由 refreshAll 的 error 提示，这里静默 */ });
+  }, [activeReleaseID, currentUser, page, refreshAll, routeReleaseID, selection]);
 
+  // 归一化只作用于 selection（创建/详情编辑上下文），允许 fallback 到第一个可用对象。
+  // 发布中心、发布记录的列表筛选不进入此 effect，空值必须保持空值（即“全部”）。
   useEffect(() => {
     setSelection((current) => {
       const serviceID = keepOrFirst(current.serviceID, state.services);
@@ -538,19 +813,17 @@ export function App() {
       const versionID = keepOrFirst(current.versionID, state.versions);
       const targets = filterTargets(state.targets, serviceID, environmentID);
       const targetID = keepOrFirst(current.targetID, targets.length > 0 ? targets : state.targets);
-      const userID = currentUser?.id ? String(currentUser.id) : keepOrFirst(current.userID, state.users);
       if (
         serviceID === current.serviceID &&
         environmentID === current.environmentID &&
         versionID === current.versionID &&
-        targetID === current.targetID &&
-        userID === current.userID
+        targetID === current.targetID
       ) {
         return current;
       }
-      return { serviceID, environmentID, versionID, targetID, userID };
+      return { serviceID, environmentID, versionID, targetID };
     });
-  }, [currentUser?.id, state.environments, state.services, state.targets, state.users, state.versions]);
+  }, [state.environments, state.services, state.targets, state.versions]);
 
   useEffect(() => {
     setPreflight(null);
@@ -729,9 +1002,10 @@ export function App() {
     setPage('release-detail', String(item.id));
   }
 
-  async function selectDeploy(deployID: string) {
-    setActiveDeployID(deployID);
-    await refreshServerLogs(deployID);
+  async function selectDeploy(item: Entity) {
+    setActiveDeploy(item);
+    setActiveDeployID(String(item.id));
+    await refreshServerLogs(String(item.id));
   }
 
   async function refreshServerLogs(deployID: string) {
@@ -760,16 +1034,12 @@ export function App() {
   const canRollbackRelease = activeReleaseStatus === 'success' || selected.release?.summary_status === 'partial';
   const canRetryRelease = activeReleaseStatus === 'failed' || selected.release?.summary_status === 'partial';
 
-  const activeReleaseDeploys = state.deploys.filter((item) => String(item.release_request_id) === String(activeReleaseID));
-  const activeDeploy = findByID(state.deploys, activeDeployID);
-
   async function signIn(username: string, password: string) {
     setLoading(true);
     setError('');
     try {
       const user = await apiPost<Entity>('/api/v1/auth/login', { username, password });
       setCurrentUser(user);
-      setSelection((current) => ({ ...current, userID: String(user.id ?? '') }));
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败');
     } finally {
@@ -893,24 +1163,29 @@ export function App() {
 
           {page === 'releases' ? (
             <>
-              <PageHeading eyebrow="RELEASE CENTER" title="发布中心" description="查看、确认和追踪每一次发布。" action={<Space><Button onClick={() => setPage('deploys')}>发布记录</Button><Button type="primary" onClick={() => setPage('create')}>创建发布单</Button></Space>} />
+              <PageHeading eyebrow="RELEASE CENTER" title="发布中心" description="查看、确认和追踪每一次发布。" action={<Button type="primary" onClick={() => setPage('create')}>创建发布单</Button>} />
               <section className="surface list-surface">
                 <div className="list-toolbar-v2">
                   <div className="segmented-control">
-                    <button className={releaseView === 'pending' ? 'active' : ''} onClick={() => setReleaseView('pending')}>待我确认</button>
-                    <button className={releaseView === 'mine' ? 'active' : ''} onClick={() => setReleaseView('mine')}>我发起的</button>
-                    <button className={releaseView === 'all' ? 'active' : ''} onClick={() => setReleaseView('all')}>全部发布</button>
+                    <button className={releaseListFilters.view === 'pending' ? 'active' : ''} onClick={() => changeReleaseFilters({ view: 'pending' })}>待我确认</button>
+                    <button className={releaseListFilters.view === 'mine' ? 'active' : ''} onClick={() => changeReleaseFilters({ view: 'mine' })}>我发起的</button>
+                    <button className={releaseListFilters.view === 'all' ? 'active' : ''} onClick={() => changeReleaseFilters({ view: 'all' })}>全部发布</button>
                   </div>
                   <div className="filter-row">
-                    <Select value={selection.serviceID || undefined} placeholder="全部服务" allowClear options={state.services.map(entityOption)} onChange={(value) => changeSelection({ serviceID: value ?? '', versionID: '', targetID: '' })} />
-                    <Select value={selection.environmentID || undefined} placeholder="全部环境" allowClear options={state.environments.map(entityOption)} onChange={(value) => changeSelection({ environmentID: value ?? '', targetID: '' })} />
-                    <Select value={filters.releaseStatus} options={releaseStatusOptions} onChange={(value) => changeReleaseFilters({ releaseStatus: value })} />
-                    <Select value={releaseSource} options={[{ label: '全部来源', value: 'all' }, ...Array.from(new Set(state.releases.map((item) => String(item.source ?? 'web')))).map((value) => ({ label: value, value }))]} onChange={setReleaseSource} />
-                    <Select value={releaseTimeRange} options={[{ label: '全部时间', value: 'all' }, { label: '近 24 小时', value: '24' }, { label: '近 7 天', value: '168' }]} onChange={(value) => { setReleaseTimeRange(value); setReleaseFilterNow(Date.now()); }} />
-                    <Input className="release-search" value={releaseQuery} allowClear placeholder="搜索发布单、申请人或来源" onChange={(event) => setReleaseQuery(event.target.value)} />
+                    <Select value={releaseListFilters.projectID || undefined} placeholder="全部项目" allowClear options={state.projects.map(entityOption)} onChange={(value) => changeReleaseFilters({ projectID: value ?? '', serviceID: '' })} />
+                    <Select value={releaseListFilters.serviceID || undefined} placeholder="全部服务" allowClear options={state.services.filter((s) => !releaseListFilters.projectID || String(s.project_id) === releaseListFilters.projectID).map(entityOption)} onChange={(value) => changeReleaseFilters({ serviceID: value ?? '' })} />
+                    <Select value={releaseListFilters.environmentID || undefined} placeholder="全部环境" allowClear options={state.environments.map(entityOption)} onChange={(value) => changeReleaseFilters({ environmentID: value ?? '' })} />
+                    <Select value={releaseListFilters.status} options={releaseStatusOptions} onChange={(value) => changeReleaseFilters({ status: value })} />
+                    <Select value={releaseListFilters.source} options={releaseSourceOptions} onChange={(value) => changeReleaseFilters({ source: value })} />
+                    <Select value={releaseListFilters.timeRange} options={[{ label: '全部时间', value: 'all' }, { label: '近 24 小时', value: '24' }, { label: '近 7 天', value: '168' }]} onChange={(value) => changeReleaseFilters({ timeRange: value })} />
+                    <Input className="release-search" value={releaseListFilters.query} allowClear placeholder="搜索发布单、申请人或来源" onChange={(event) => changeReleaseFilters({ query: event.target.value })} />
+                    {!releaseListFiltersEqual(releaseListFilters, RELEASE_FILTER_DEFAULTS) ? <Button className="quiet-button" onClick={() => changeReleaseFilters({ ...RELEASE_FILTER_DEFAULTS })}>清除筛选</Button> : null}
                   </div>
                 </div>
-                <ReleaseRows data={visibleReleases} state={state} onOpen={(item) => void selectRelease(item)} />
+                <ReleaseRows data={releaseListData.items} state={state} onOpen={(item) => void selectRelease(item)} />
+                {releaseListData.total > releaseListData.page_size ? (
+                  <Pagination className="list-pagination" current={releaseListFilters.page} total={releaseListData.total} pageSize={releaseListData.page_size} onChange={(p) => changeReleasePage(p)} showTotal={(t) => `共 ${t} 条`} />
+                ) : null}
               </section>
             </>
           ) : null}
@@ -935,7 +1210,7 @@ export function App() {
                       ['服务', selected.service?.name], ['环境', selected.environment?.name], ['版本', selected.version?.version], ['部署目标', formatTarget(selected.target, selected.targetRef)], ['来源', activeRelease.source], ['申请人', formatActor(activeRelease.created_by_type, activeRelease.created_by_id, state)], ['授权人', formatActor('user', activeRelease.authorized_by_user_id, state)], ['确认人', activeRelease.confirmed_by_user_id ? `${formatActor('user', activeRelease.confirmed_by_user_id, state)}${activeRelease.confirmed_at ? ` · ${formatDateTime(activeRelease.confirmed_at)}` : ''}` : ''], ['驳回人', activeRelease.rejected_by_user_id ? `${formatActor('user', activeRelease.rejected_by_user_id, state)}${activeRelease.rejected_reason ? ` · ${activeRelease.rejected_reason}` : ''}` : ''], ['创建时间', formatDateTime(activeRelease.created_at)], ['更新时间', formatDateTime(activeRelease.updated_at)],
                     ]} /></section>
                     <section className="surface"><SectionTitle title="预检与门禁" meta="PREFLIGHT" /><PreflightPanel result={preflight} /></section>
-                    <section className="surface"><SectionTitle title="关联发布记录" meta="DEPLOY RECORDS" /><DeployRows data={activeReleaseDeploys} state={state} releases={releaseByID} onOpen={(item) => { void selectDeploy(String(item.id)); setPage('deploys'); }} /></section>
+                    <section className="surface"><SectionTitle title="关联发布记录" meta="DEPLOY RECORDS" /><DeployRows data={activeReleaseDeploys} state={state} onOpen={(item) => { void selectDeploy(item); goToDeploys(String(activeReleaseID ?? '')); }} /></section>
                     <section className="surface"><SectionTitle title="事件流" meta="EVENTS" /><EventRows data={state.events} state={state} /></section>
                   </div>
                   <aside className="detail-side surface"><span className="mono-label">恢复路径</span><h3>{releaseStatusValue(activeRelease) === 'partial' ? '部分成功按失败处理' : '发布恢复'}</h3><p>{activeRelease.status === 'running' ? '运行中的发布不可在系统内紧急停止，请结合执行器、服务器与超时机制人工处理。' : '失败或部分成功后，请创建新的发布单重新发布或回滚。'}</p><Button onClick={() => void refreshAll(String(activeRelease.id))}>刷新当前状态</Button></aside>
@@ -948,8 +1223,20 @@ export function App() {
             <>
               <PageHeading eyebrow="DEPLOY RECORDS" title="发布记录" description="以服务器结果为准，定位真实执行情况。" action={<Button onClick={() => setPage('releases')}>返回发布中心</Button>} />
               <section className="surface list-surface">
-                <div className="list-toolbar-v2"><div className="filter-row"><Select value={filters.deployStatus} options={deployStatusOptions} onChange={(value) => changeDeployFilters({ deployStatus: value })} /><Checkbox checked={filters.scoped} onChange={(event) => changeDeployFilters({ scoped: event.target.checked })}>仅当前服务与环境</Checkbox></div></div>
-                <DeployRows data={filteredDeploys} state={state} releases={releaseByID} onOpen={(item) => void selectDeploy(String(item.id))} />
+                {deployFilterSummary ? (
+                  <Alert
+                    className="filter-notice"
+                    type="info"
+                    showIcon
+                    message={deployFilterSummary}
+                    action={<Button size="small" onClick={() => changeDeployFilters({ releaseRequestID: '', serviceID: '', environmentID: '', status: 'all' })}>查看全部记录</Button>}
+                  />
+                ) : null}
+                <div className="list-toolbar-v2"><div className="filter-row"><Select value={deployListFilters.status} options={deployStatusOptions} onChange={(value) => changeDeployFilters({ status: value })} /></div></div>
+                <DeployRows data={deployListData.items} state={state} onOpen={(item) => void selectDeploy(item)} />
+                {deployListData.total > deployListData.page_size ? (
+                  <Pagination className="list-pagination" current={deployListFilters.page} total={deployListData.total} pageSize={deployListData.page_size} onChange={(p) => changeDeployPage(p)} showTotal={(t) => `共 ${t} 条`} />
+                ) : null}
               </section>
               {activeDeploy ? <section className="surface deploy-detail"><SectionTitle title="执行快照" meta={`DEPLOY ${shortID(activeDeploy.id)}`} /><KeyValueGrid values={[
                 ['状态', activeDeploy.status], ['执行器', activeDeploy.executor_type], ['创建时间', formatDateTime(activeDeploy.created_at)], ['更新时间', formatDateTime(activeDeploy.updated_at)], ['目标服务器数', activeDeploy.total_servers], ['成功 / 失败 / 跳过', `${activeDeploy.success_servers ?? 0} / ${activeDeploy.failed_servers ?? 0} / ${activeDeploy.skipped_servers ?? 0}`],
@@ -1110,7 +1397,7 @@ export function App() {
                 {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据只供服务器 SSH 连接引用；Secret 不会在创建后再次展示。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('credential')}>新建凭据</Button></div><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><CredentialList data={state.credentials} servers={state.servers} onDone={() => void refreshAll()} /></section></> : null}
               </div>
               <Drawer title={mgmtCreatingKind ? mgmtCreateTitles[mgmtCreatingKind] : ''} open={mgmtCreatingKind !== null} onClose={() => setMgmtCreatingKind(null)} width={520} footer={null} destroyOnClose>
-                {mgmtCreatingKind === 'user' ? <UserForm onDone={(user) => { refreshWithSelection({ userID: String(user.id ?? '') }); void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
+                {mgmtCreatingKind === 'user' ? <UserForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
                 {mgmtCreatingKind === 'api-key' ? <APIKeyForm users={state.users} onCreated={() => { void refreshAll(); }} /> : null}
                 {mgmtCreatingKind === 'notification' ? <NotificationForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
                 {mgmtCreatingKind === 'credential' ? <CredentialForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
@@ -1198,9 +1485,9 @@ function ReleaseRows({ data, state, onOpen }: { data: Entity[]; state: AppState;
   return <div className="release-table">{data.map((item) => <button className="release-row" key={String(item.id)} onClick={() => onOpen(item)}><span className="release-id">{shortID(item.id)}</span><span><strong>{formatReleaseContext(item, state)}</strong><small>{`申请人：${formatActor(item.created_by_type, item.created_by_id, state)} · 来源：${item.source ?? '-'}`}</small></span><StatusTag value={releaseStatusValue(item)} /><span className="next-action">{releaseActionLabel(item)}</span><span aria-hidden="true">→</span></button>)}</div>;
 }
 
-function DeployRows({ data, state, releases, onOpen }: { data: Entity[]; state: AppState; releases: Map<string, Entity>; onOpen: (item: Entity) => void }) {
+function DeployRows({ data, state, onOpen }: { data: Entity[]; state: AppState; onOpen: (item: Entity) => void }) {
   if (data.length === 0) return <div className="inline-empty">暂无发布记录。</div>;
-  return <div className="deploy-list">{data.map((item) => <button className="deploy-row" key={String(item.id)} onClick={() => onOpen(item)}><span><strong>{shortID(item.id)}</strong><small>{formatDeployContext(item, releases, state)}</small></span><span className="server-counts">成功 {item.success_servers ?? 0} / 失败 {item.failed_servers ?? 0} / 跳过 {item.skipped_servers ?? 0}</span><StatusTag value={String(item.status)} /><span aria-hidden="true">→</span></button>)}</div>;
+  return <div className="deploy-list">{data.map((item) => <button className="deploy-row" key={String(item.id)} onClick={() => onOpen(item)}><span><strong>{shortID(item.id)}</strong><small>{formatDeployContext(item, state)}</small></span><span className="server-counts">成功 {item.success_servers ?? 0} / 失败 {item.failed_servers ?? 0} / 跳过 {item.skipped_servers ?? 0}</span><StatusTag value={String(item.status)} /><span aria-hidden="true">→</span></button>)}</div>;
 }
 
 function EventRows({ data, state }: { data: Entity[]; state: AppState }) {
@@ -2776,15 +3063,6 @@ function filterTargets(items: Entity[], serviceID?: string | number | boolean | 
   });
 }
 
-function releaseMatchesSelection(item: Entity | undefined, serviceID?: string | number | boolean | null, environmentID?: string | number | boolean | null) {
-  if (!item) {
-    return false;
-  }
-  const serviceMatched = !serviceID || String(item.service_id) === String(serviceID);
-  const environmentMatched = !environmentID || String(item.environment_id) === String(environmentID);
-  return serviceMatched && environmentMatched;
-}
-
 function formatReleaseContext(item: Entity, state: AppState) {
   const service = findByID(state.services, item.service_id);
   const environment = findByID(state.environments, item.environment_id);
@@ -2796,12 +3074,15 @@ function formatReleaseContext(item: Entity, state: AppState) {
   ].join(' / ');
 }
 
-function formatDeployContext(item: Entity, releases: Map<string, Entity>, state: AppState) {
-  const release = releases.get(String(item.release_request_id ?? ''));
-  if (!release) {
+// 发布记录上下文：从 item 自带的 release_*_id 字段拼展示（后端 LEFT JOIN release_requests 提供）。
+function formatDeployContext(item: Entity, state: AppState) {
+  const svcID = String(item.release_service_id ?? '');
+  const envID = String(item.release_environment_id ?? '');
+  const verID = String(item.release_service_version_id ?? '');
+  if (!svcID && !envID && !verID) {
     return `发布单 ${shortID(item.release_request_id)}`;
   }
-  return `${shortID(release.id)} · ${formatReleaseContext(release, state)}`;
+  return `${shortID(item.release_request_id)} · ${namedRef(findByID(state.services, svcID), svcID, 'name')} / ${namedRef(findByID(state.environments, envID), envID, 'name')} / ${namedRef(findByID(state.versions, verID), verID, 'version')}`;
 }
 
 function formatEventContext(item: Entity, state: AppState) {

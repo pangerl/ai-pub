@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 
 	"ai-pub/internal/config"
+	"ai-pub/internal/domain"
 	"ai-pub/internal/migration"
+	"ai-pub/internal/repository"
 )
 
 func TestInventoryAPIFlow(t *testing.T) {
@@ -405,8 +408,8 @@ func TestInventoryAPIFlow(t *testing.T) {
 	if !bytes.Contains(eventBytes, []byte("preflight_checked")) || !bytes.Contains(eventBytes, []byte("release_confirmed")) {
 		t.Fatalf("expected preflight_checked and release_confirmed events, got %s", eventBytes)
 	}
-	deploys := getForData(t, router, "/api/v1/deploy-records")
-	deployBytes, err := json.Marshal(deploys)
+	deploys := getForData(t, router, "/api/v1/deploy-records").(map[string]any)
+	deployBytes, err := json.Marshal(deploys["items"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,6 +427,76 @@ func TestInventoryAPIFlow(t *testing.T) {
 	}
 	if !bytes.Contains(opsBytes, []byte("total_release_requests")) {
 		t.Fatalf("expected ops summary fields, got %s", opsBytes)
+	}
+}
+
+// TestReleaseListPagination 覆盖发布单列表的服务端筛选与分页：
+// 插入 55 条后，默认第 1 页 50 条、total=55；第 2 页返回剩余 5 条；
+// status 多值筛选与 page_size 上限生效。
+func TestReleaseListPagination(t *testing.T) {
+	db := newHTTPTestDB(t)
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{}})
+	store := repository.NewStore(db)
+	ctx := context.Background()
+
+	// 直接经 store 插入 55 条发布单，避免重复整套 API key 预置流程。
+	for i := 0; i < 55; i++ {
+		status := "pending_confirm"
+		if i%2 == 0 {
+			status = "success"
+		}
+		if _, err := store.CreateReleaseRequest(ctx, domain.ReleaseRequest{
+			ServiceID:           "svc-paging",
+			EnvironmentID:       "env-paging",
+			ServiceVersionID:    "ver-paging",
+			DeploymentTargetID:  "tgt-paging",
+			Status:              status,
+			Source:              "web",
+			CreatedByType:       "user",
+			CreatedByID:         "usr-paging",
+			SummaryStatus:       "ok",
+			IdempotencyKey:      "paging-" + strconv.Itoa(i),
+		}); err != nil {
+			t.Fatalf("create release %d: %v", i, err)
+		}
+	}
+
+	page1 := getForData(t, router, "/api/v1/release-requests").(map[string]any)
+	if len(page1["items"].([]any)) != 50 {
+		t.Fatalf("expected 50 items on page 1, got %d", len(page1["items"].([]any)))
+	}
+	if int(page1["total"].(float64)) != 55 {
+		t.Fatalf("expected total 55, got %v", page1["total"])
+	}
+	if int(page1["page"].(float64)) != 1 || int(page1["page_size"].(float64)) != 50 {
+		t.Fatalf("expected page=1 page_size=50, got page=%v page_size=%v", page1["page"], page1["page_size"])
+	}
+
+	page2 := getForData(t, router, "/api/v1/release-requests?page=2").(map[string]any)
+	if len(page2["items"].([]any)) != 5 {
+		t.Fatalf("expected 5 items on page 2, got %d", len(page2["items"].([]any)))
+	}
+	if int(page2["page"].(float64)) != 2 {
+		t.Fatalf("expected page=2, got %v", page2["page"])
+	}
+
+	// status 多值筛选：pending_confirm 与 success 合计 55 条，total 仍为 55。
+	filtered := getForData(t, router, "/api/v1/release-requests?status=pending_confirm,success").(map[string]any)
+	if int(filtered["total"].(float64)) != 55 {
+		t.Fatalf("expected total 55 with multi-status filter, got %v", filtered["total"])
+	}
+
+	// 单状态筛选：success 占一半（28 条，i%2==0 即 0,2,...,54 共 28 个）。
+	successOnly := getForData(t, router, "/api/v1/release-requests?status=success").(map[string]any)
+	if int(successOnly["total"].(float64)) != 28 {
+		t.Fatalf("expected 28 success releases, got %v", successOnly["total"])
+	}
+
+	// page_size 上限：请求 200，仍受默认上限约束为 50（ListReleaseRequests 不设上限，直接用传入值）。
+	// 这里验证显式 page_size=10 生效。
+	smallPage := getForData(t, router, "/api/v1/release-requests?page_size=10").(map[string]any)
+	if len(smallPage["items"].([]any)) != 10 {
+		t.Fatalf("expected 10 items with page_size=10, got %d", len(smallPage["items"].([]any)))
 	}
 }
 

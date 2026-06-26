@@ -5,9 +5,33 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"ai-pub/internal/domain"
 )
+
+// ReleaseListFilter 描述发布单列表的服务端筛选与分页条件。空字段表示不限制。
+type ReleaseListFilter struct {
+	ProjectID      string
+	Status         string // 逗号分隔多值，如 "pending_confirm,running"
+	ServiceID      string
+	EnvironmentID  string
+	CreatedByID    string
+	Source         string
+	Query          string // 模糊匹配 id / source / created_by_id / 申请人 display_name
+	TimeRangeHours int    // >0 时筛选 created_at >= now-Xh
+	Page           int
+	PageSize       int
+}
+
+// PagedReleases 是分页发布单列表的响应结构。
+type PagedReleases struct {
+	Items    []domain.ReleaseRequest `json:"items"`
+	Total    int                     `json:"total"`
+	Page     int                     `json:"page"`
+	PageSize int                     `json:"page_size"`
+}
 
 func (s Store) GetUser(ctx context.Context, id string) (domain.User, error) {
 	row := s.db.QueryRowContext(ctx, `
@@ -63,25 +87,98 @@ created_by_type, created_by_id, authorized_by_user_id, rejected_reason, rollback
 	return item, err
 }
 
-func (s Store) ListReleaseRequests(ctx context.Context) ([]domain.ReleaseRequest, error) {
+func (s Store) ListReleaseRequests(ctx context.Context, filter ReleaseListFilter) (PagedReleases, error) {
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 {
+		filter.PageSize = 50
+	}
+
+	// 动态 WHERE 按 ListDeploymentTargets（repository.go）的 clauses/args 模式构建。
+	var clauses []string
+	var args []any
+	if filter.ProjectID != "" {
+		clauses = append(clauses, "release_requests.project_id = ?")
+		args = append(args, filter.ProjectID)
+	}
+	if filter.ServiceID != "" {
+		clauses = append(clauses, "release_requests.service_id = ?")
+		args = append(args, filter.ServiceID)
+	}
+	if filter.EnvironmentID != "" {
+		clauses = append(clauses, "release_requests.environment_id = ?")
+		args = append(args, filter.EnvironmentID)
+	}
+	if filter.CreatedByID != "" {
+		clauses = append(clauses, "release_requests.created_by_id = ?")
+		args = append(args, filter.CreatedByID)
+	}
+	if filter.Source != "" {
+		clauses = append(clauses, "release_requests.source = ?")
+		args = append(args, filter.Source)
+	}
+	// status 支持逗号分隔多值，转 IN (...)；单值也走同一路径。
+	if filter.Status != "" {
+		statuses := strings.Split(filter.Status, ",")
+		placeholders := make([]string, len(statuses))
+		for i, st := range statuses {
+			placeholders[i] = "?"
+			args = append(args, strings.TrimSpace(st))
+		}
+		clauses = append(clauses, "release_requests.status IN ("+strings.Join(placeholders, ", ")+")")
+	}
+	if filter.TimeRangeHours > 0 {
+		clauses = append(clauses, "release_requests.created_at >= ?")
+		args = append(args, formatTime(nowUTC().Add(-time.Duration(filter.TimeRangeHours)*time.Hour)))
+	}
+
+	// q 非空时 LEFT JOIN users 匹配申请人 display_name，复刻前端 formatActor 搜索语义。
+	joinUsers := ""
+	if filter.Query != "" {
+		joinUsers = ` LEFT JOIN users u ON u.id = release_requests.created_by_id AND release_requests.created_by_type = 'user'`
+		like := "%" + filter.Query + "%"
+		clauses = append(clauses, "(release_requests.id LIKE ? OR release_requests.source LIKE ? OR release_requests.created_by_id LIKE ? OR u.display_name LIKE ?)")
+		args = append(args, like, like, like, like)
+	}
+
+	where := ""
+	if len(clauses) > 0 {
+		where = " WHERE " + strings.Join(clauses, " AND ")
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, project_id, service_id, environment_id, service_version_id, deployment_target_id, status, source, idempotency_key,
 created_by_type, created_by_id, authorized_by_user_id, confirmed_by_user_id, confirmed_at, rejected_by_user_id, rejected_reason,
 rollback_of_id, summary_status, summary_message, metadata, created_at, updated_at
-FROM release_requests ORDER BY created_at DESC, id DESC`)
+FROM release_requests`+joinUsers+where+`
+ORDER BY created_at DESC, id DESC
+LIMIT ? OFFSET ?`,
+		append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)...)
 	if err != nil {
-		return nil, err
+		return PagedReleases{}, err
 	}
 	defer rows.Close()
 	items := []domain.ReleaseRequest{}
 	for rows.Next() {
 		item, err := scanReleaseRequest(rows)
 		if err != nil {
-			return nil, err
+			return PagedReleases{}, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return PagedReleases{}, err
+	}
+
+	// COUNT 复用相同 WHERE/JOIN，保证总数与筛选一致。
+	var total int
+	countArgs := args[:len(args)] // COUNT 不带 LIMIT/OFFSET 的尾部两个参数
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM release_requests`+joinUsers+where, countArgs...).Scan(&total); err != nil {
+		return PagedReleases{}, err
+	}
+
+	return PagedReleases{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
 }
 
 func (s Store) GetReleaseRequest(ctx context.Context, id string) (domain.ReleaseRequest, error) {

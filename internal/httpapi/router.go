@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"ai-pub/internal/app"
@@ -143,4 +144,16 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code string,
 		Error:     apiError{Code: code, Message: err.Error()},
 		RequestID: requestIDFrom(r),
 	})
+}
+
+// parseIntDefault 解析 query 参数为 int，空串或非法时返回默认值。用于分页/时间范围参数。
+func parseIntDefault(value string, fallback int) int {
+	if value == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

@@ -25,6 +25,8 @@ button { cursor: pointer; }
 .quiet-button.ant-btn { border-radius: 999px; border-color: #ebebeb; box-shadow: none; }
 .app-main { width: min(1440px, 100%); margin: 0 auto; padding: 48px 32px 96px; }
 .notice { margin-bottom: 24px; }
+.filter-notice { margin: 16px 16px 0; }
+.list-pagination { display: flex; justify-content: flex-end; padding: 16px; border-top: 1px solid #ebebeb; }
 .page-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 32px; }.page-heading h1 { margin: 7px 0 8px; font-size: clamp(30px, 4vw, 48px); line-height: 1; letter-spacing: -2.4px; font-weight: 600; }.page-heading p { margin: 0; color: #4d4d4d; font-size: 16px; line-height: 24px; }.page-heading-action { flex: none; }
 .mono-label { color: #888; font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
 .surface { border: 1px solid #ebebeb; border-radius: 8px; background: #fff; }.surface h2, .surface h3 { margin-top: 0; letter-spacing: -.6px; }.surface h3 { font-size: 15px; }

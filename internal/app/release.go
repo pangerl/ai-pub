@@ -287,8 +287,8 @@ func sameIdempotentCreate(existing domain.ReleaseRequest, input CreateReleaseInp
 		existing.CreatedByID == input.CreatedByID
 }
 
-func (s ReleaseService) List(ctx context.Context) ([]domain.ReleaseRequest, error) {
-	return s.store.ListReleaseRequests(ctx)
+func (s ReleaseService) List(ctx context.Context, filter repository.ReleaseListFilter) (repository.PagedReleases, error) {
+	return s.store.ListReleaseRequests(ctx, filter)
 }
 
 func (s ReleaseService) Get(ctx context.Context, id string) (domain.ReleaseRequest, error) {

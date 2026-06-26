@@ -104,12 +104,25 @@ func listReleases(service app.ReleaseService, store repository.Store) http.Handl
 		if _, ok := authorizeOptionalAPIKey(w, r, store, "release:read"); !ok {
 			return
 		}
-		items, err := service.List(r.Context())
+		q := r.URL.Query()
+		filter := repository.ReleaseListFilter{
+			ProjectID:      q.Get("project_id"),
+			Status:         q.Get("status"),
+			ServiceID:      q.Get("service_id"),
+			EnvironmentID:  q.Get("environment_id"),
+			CreatedByID:    q.Get("created_by_id"),
+			Source:         q.Get("source"),
+			Query:          q.Get("q"),
+			TimeRangeHours: parseIntDefault(q.Get("time_range"), 0),
+			Page:           parseIntDefault(q.Get("page"), 1),
+			PageSize:       parseIntDefault(q.Get("page_size"), 50),
+		}
+		result, err := service.List(r.Context(), filter)
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 			return
 		}
-		writeData(w, r, http.StatusOK, items)
+		writeData(w, r, http.StatusOK, result)
 	}
 }
 
