@@ -471,7 +471,7 @@ export function App() {
     return parts.length > 0 ? `正在查看按 ${parts.join(' / ')} 筛选的记录` : '';
   }, [deployListFilters.environmentID, deployListFilters.releaseRequestID, deployListFilters.serviceID, state.environments, state.services]);
 
-  // 工作台分桶：从定向查询拿到的 workbenchSlice 按状态/归属分到 pending/running/failed。
+  // 工作台分桶：从定向查询拿到的 workbenchSlice 按状态/归属分到 pending/inProgress/failed。
   // workbenchSlice 由 refreshAll 中发起的定向请求填充（见 fetchWorkbenchSlice）。
   const workbenchReleases = useMemo(() => {
     const currentUserID = String(currentUser?.id ?? '');
@@ -479,8 +479,8 @@ export function App() {
       pending: workbenchSlice.filter(
         (item) => item.status === 'pending_confirm' && (currentUser?.role === 'admin' || (currentUserID !== '' && String(item.created_by_id) === currentUserID)),
       ),
-      running: workbenchSlice.filter(
-        (item) => item.status === 'running' && currentUserID !== '' && String(item.created_by_id) === currentUserID,
+      inProgress: workbenchSlice.filter(
+        (item) => (item.status === 'queued' || item.status === 'running') && currentUserID !== '' && String(item.created_by_id) === currentUserID,
       ),
       failed: workbenchSlice.filter(
         (item) => currentUserID !== '' && String(item.created_by_id) === currentUserID && (item.status === 'failed' || item.status === 'partial'),
@@ -496,7 +496,7 @@ export function App() {
   const needsSetup = currentUser?.role === 'admin' && setupSteps.some((step) => !step.complete);
 
   // 工作台上下文用定向查询替代全量列表：admin 多看全量待确认，其余只看自己的进行中/失败。
-  // 后端 status 支持逗号分隔多值；前端拿到后按状态分桶到 pending/running/failed。
+  // 后端 status 支持逗号分隔多值；前端拿到后按状态分桶到 pending/inProgress/failed。
   const fetchWorkbenchSlice = useCallback(async (user: Entity | null): Promise<Entity[]> => {
     if (!user?.id) {
       return [];
@@ -506,11 +506,11 @@ export function App() {
       if (user.role === 'admin') {
         const [pending, mine] = await Promise.all([
           apiGet<PagedList<Entity>>('/api/v1/release-requests?status=pending_confirm&page_size=20'),
-          apiGet<PagedList<Entity>>(`/api/v1/release-requests?created_by_id=${encodeURIComponent(me)}&status=running,failed,partial&page_size=10`),
+          apiGet<PagedList<Entity>>(`/api/v1/release-requests?created_by_id=${encodeURIComponent(me)}&status=queued,running,failed,partial&page_size=10`),
         ]);
         return [...pending.items, ...mine.items];
       }
-      const result = await apiGet<PagedList<Entity>>(`/api/v1/release-requests?created_by_id=${encodeURIComponent(me)}&status=pending_confirm,running,failed,partial&page_size=30`);
+      const result = await apiGet<PagedList<Entity>>(`/api/v1/release-requests?created_by_id=${encodeURIComponent(me)}&status=pending_confirm,queued,running,failed,partial&page_size=30`);
       return result.items;
     } catch {
       return [];
@@ -1098,7 +1098,7 @@ export function App() {
                 <SectionTitle title="需要处理的发布" meta="MY RELEASE WORK" />
                 <div className="content-grid three-up">
                 <TaskList title="待我确认" data={workbenchReleases.pending} state={state} empty="暂无待确认发布" onOpen={(item) => void selectRelease(item)} />
-                <TaskList title="我发起的运行中" data={workbenchReleases.running} state={state} empty="暂无运行中发布" onOpen={(item) => void selectRelease(item)} />
+                <TaskList title="我发起的进行中" data={workbenchReleases.inProgress} state={state} empty="暂无进行中发布" onOpen={(item) => void selectRelease(item)} />
                 <TaskList title="我发起的最近失败" data={workbenchReleases.failed} state={state} empty="暂无失败发布" onOpen={(item) => void selectRelease(item)} />
                 </div>
               </section>
