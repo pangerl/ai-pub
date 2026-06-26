@@ -1,5 +1,7 @@
 .cache/
 data/
+.env
+.env.local
 web/dist/
 web/node_modules/
 web/*.tsbuildinfo

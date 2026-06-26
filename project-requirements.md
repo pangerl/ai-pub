@@ -1098,23 +1098,22 @@ React 最小管理界面第一版页面清单：
 
 ### 13.2 后端技术架构
 
-建议后端技术栈：
+当前后端技术栈：
 
 - Go。
-- 标准 `net/http` + 轻量路由框架。
-- REST API + OpenAPI。
-- `database/sql` + 轻量 SQL 辅助工具。
+- 标准 `net/http` 与 `ServeMux`。
+- REST API。
+- `database/sql`。
 - 显式 migration。
 - MySQL repository 与后续 PostgreSQL 方言隔离。
 - 内置 Worker 处理发布队列和状态修复。
 
-后端框架建议：
+后端框架约束：
 
-- 第一版优先选择轻量、贴近 Go 标准库的 HTTP 路由框架，例如 `chi`。
-- 不建议第一版引入重型 Web 框架，避免框架复杂度压过发布领域模型。
+- 第一版保持贴近 Go 标准库，不引入重型 Web 框架，避免框架复杂度压过发布领域模型。
 - API 层只负责认证、鉴权、参数校验和响应转换；发布单、preflight、确认、队列、执行器、审计等业务逻辑应放在应用服务和领域层。
 
-建议后端分层：
+当前后端分层：
 
 ```text
 cmd/server
@@ -1124,9 +1123,9 @@ internal/domain         # Project、Service、ReleaseRequest 等领域对象
 internal/repository     # 显式 SQL 和事务封装
 internal/executor       # Mock/Dry-run、SSH
 internal/worker         # 发布队列调度、僵尸任务修复
-internal/audit          # 审计事件写入和查询
 internal/migration      # MySQL migration runner
 internal/config         # 配置加载和校验
+internal/auth           # 登录、密码哈希和会话 token
 ```
 
 后端关键约束：
@@ -1140,13 +1139,13 @@ internal/config         # 配置加载和校验
 
 第一版前端定位为 React 最小管理界面。它不是临时页面，而是正式前端架构的第一阶段，只覆盖人工跑通发布闭环所需的核心页面，后续再逐步扩展完整管理台能力。
 
-建议前端技术栈：
+当前前端技术栈：
 
 - React。
 - TypeScript。
 - Vite。
-- React Router。
-- TanStack Query。
+- 手写轻量路由状态。
+- 直接通过 `fetch` 调用后端 API。
 - Ant Design。
 
 选择理由：
@@ -1154,10 +1153,9 @@ internal/config         # 配置加载和校验
 - 该系统是登录后的管理台和发布操作台，不需要 SSR，Vite SPA 足够简单。
 - 第一阶段不做完整管理台，避免过早投入复杂导航、统计、筛选和视觉细节。
 - React + TypeScript 生态成熟，适合复杂表单、状态页、详情页和实时轮询。
-- TanStack Query 适合管理发布单列表、发布状态轮询、日志查询、Agent summary 等服务端状态。
 - Ant Design 适合表格、表单、筛选、抽屉、确认弹窗、状态标签等后台管理场景，能降低第一版 UI 成本。
 
-前端建议分层：
+前端当前实现仍集中在 `web/src/App.tsx` 与 `web/src/styles.css`，适合 MVP 阶段快速闭环。后续如继续扩展，可按以下方向拆分：
 
 ```text
 src/app              # 路由、Provider、全局初始化

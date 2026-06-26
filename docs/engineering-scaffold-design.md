@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-本文定义第一版工程目录、配置、启动、migration、测试和本地 demo 方式。
+本文定义第一版工程目录、配置、启动、migration、测试和本地 Compose 验收方式。
 
 目标：
 
@@ -25,10 +25,11 @@
 │   └── server/
 ├── internal/
 │   ├── app/
-│   ├── audit/
+│   ├── auth/
 │   ├── config/
 │   ├── crypto/
 │   ├── domain/
+│   ├── e2e/
 │   ├── executor/
 │   ├── httpapi/
 │   ├── migration/
@@ -36,7 +37,8 @@
 │   ├── repository/
 │   └── worker/
 ├── migrations/
-│   └── mysql/
+│   ├── mysql/
+│   └── sqlite/        # 仅用于 Go 单测内存 schema，不是运行时
 ├── compose.yaml
 ├── Dockerfile
 ├── web/
@@ -50,7 +52,7 @@
 ## 4. 后端技术选型
 
 - Go。
-- `net/http` + 轻量路由框架，例如 `chi`。
+- `net/http` + 标准库 `ServeMux`。
 - `database/sql`。
 - 显式 SQL 和 repository。
 - 显式 migration。
@@ -61,8 +63,8 @@
 - React。
 - TypeScript。
 - Vite。
-- React Router。
-- TanStack Query。
+- 手写轻量路由状态。
+- 直接通过 `fetch` 调用后端 API。
 - Ant Design。
 
 ## 6. 环境变量
@@ -72,8 +74,10 @@
 | `APP_ENV` | `dev` | 运行环境 |
 | `HTTP_ADDR` | `:8080` | 后端监听地址 |
 | `MYSQL_DSN` | 空 | MySQL DSN |
-| `APP_ENCRYPTION_KEY` | 必填 | 凭据加密 key |
+| `APP_ENCRYPTION_KEY` | 空 | 凭据加密 key，生产必填 |
 | `JWT_SECRET` | dev 默认值 | JWT key，生产必填 |
+| `BOOTSTRAP_ADMIN_USERNAME` | `admin` | 首个管理员用户名 |
+| `BOOTSTRAP_ADMIN_PASSWORD` | 空 | 首个管理员密码，首次创建或补齐密码时必填 |
 | `MIGRATION_AUTO` | `true` | 启动自动 migration |
 | `MIGRATION_CHECK_ONLY` | `false` | 只检查 migration |
 | `WORKER_ENABLED` | `true` | 是否启动内置 Worker |
@@ -85,11 +89,16 @@ migrations/
   mysql/
     000001_init.up.sql
     000001_init.down.sql
+  sqlite/
+    000001_init.up.sql
+    000001_init.down.sql
 ```
 
 要求：
 
-- 当前仅维护 MySQL migration；PostgreSQL 接入时新增独立目录。
+- MySQL migration 是唯一运行时 migration。
+- SQLite migration 仅服务 Go 单测内存数据库，用于保持核心 schema 同构，不作为运行时承诺。
+- PostgreSQL 接入时新增独立目录。
 - 已发布 migration 不修改。
 - 记录 checksum。
 - 启动时先执行 migration，再启动 API/Worker。
@@ -119,13 +128,13 @@ npm run lint
 npm run build
 ```
 
-Migration 检查：
+代码级检查：
 
 ```bash
 make verify
 ```
 
-端到端 demo：
+端到端 Compose 验收：
 
 ```bash
 make compose-check
@@ -133,9 +142,9 @@ make compose-check
 
 具体测试包名可在实现阶段调整，但必须保留等价验证命令。
 
-## 10. Demo 数据
+## 10. 验收数据
 
-MySQL Compose demo 数据应包含：
+`make compose-check` 通过一次性验收容器创建临时数据，覆盖：
 
 - 一个管理员。
 - 一个普通员工。
@@ -143,14 +152,15 @@ MySQL Compose demo 数据应包含：
 - 一个服务。
 - test 和 prod 环境。
 - 一个 Mock 部署目标。
-- 一个 SSH 示例部署目标。
+- 成功、失败和部分成功 Mock 部署目标。
 - 两个服务版本。
+- 发布驳回、取消、确认、服务器组、重试、回滚、日志和事件流。
 
 要求：
 
-- demo 数据加载可重复执行。
-- demo 密码和 key 只能用于本地。
-- demo 不写入真实生产凭据。
+- 验收数据只存在于 Compose 验证 profile 的临时数据库中。
+- 验收密码和 key 只能用于本地。
+- 不写入真实生产凭据。
 
 ## 11. 容器化
 

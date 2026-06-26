@@ -1,6 +1,6 @@
 # 发布系统技术文档索引
 
-本文档目录记录已完成 MVP 的实现设计、验收方法和当前边界。产品需求基线见根目录的 `project-requirements.md`。
+本文档目录记录已完成 MVP 的长期设计、验收方法和当前边界。产品需求基线见根目录的 `project-requirements.md`。
 
 建议阅读顺序：
 
@@ -13,6 +13,7 @@
 7. `notification-design.md`：企业微信机器人 webhook 通知和渠道扩展点。
 8. `service-version-registration-and-backend-oci-deploy-design.md`：通用服务版本登记，以及后端 OCI 镜像部署 profile 与 GitLab CI 接入示例。
 9. `development-completion-audit.md`：当前开发完成审查、已验证范围、验收入口和暂缓项。
+10. `local-verification.md`：本地 Compose 验收、人工验证路径和外部专项验证记录。
 
 第一版实现时应始终遵守：
 
@@ -21,4 +22,4 @@
 - 审计只要求关键动作可追溯、可查询，不设计不可篡改账本。
 - 企业微信通知使用机器人 webhook，不做企业微信应用消息。
 
-当前容器化验收范围和命令见 `development-completion-audit.md` 与 `local-verification.md`。
+已删除只服务阶段开发的过程方案稿。当前容器化验收范围和命令见 `development-completion-audit.md` 与 `local-verification.md`。

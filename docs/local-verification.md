@@ -2,7 +2,7 @@
 
 本文档用于验证第一版轻量发布执行闭环。验证范围使用 Docker Compose、MySQL 8、内置 Worker 和 Mock 执行器，不依赖真实服务器或外部通知服务。
 
-当前为 MVP 阶段，数据库 schema 不承诺旧版本升级兼容。调整初始 migration 后，应通过 `make compose-down` 删除现有 Compose 数据卷，再从空库重新启动和验证。
+当前 MVP 已完成，数据库 schema 仍不承诺旧版本升级兼容。调整初始 migration 后，应通过 `make compose-down` 删除现有 Compose 数据卷，再从空库重新启动和验证。
 
 ## 启动服务
 

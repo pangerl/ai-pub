@@ -1,145 +1,121 @@
 # ai-pub
 
-轻量发布执行系统。第一版目标是先跑通 Web/API 发布闭环：配置基础对象、创建发布单、preflight、确认入队、Mock/Dry-run 执行、日志和审计查询。
+ai-pub 是一个轻量发布执行系统，面向中小研发团队的服务发布闭环：配置发布对象，创建发布单，执行 preflight，确认入队，执行 Mock/Dry-run 或 SSH 发布，查看服务器日志、审计事件、重新发布和回滚。
 
-## 当前开发阶段
+它不是完整 DevOps 平台、审批流系统或 GitOps 编排器。第一版聚焦一件事：让“发布什么版本、发布到哪个环境、谁确认、执行到哪些服务器、结果如何、失败如何追溯”进入同一条可查询、可审计的执行链路。
 
-本地 MVP 已完成。运行时统一使用 MySQL 8；开发、验收和生产不再支持 SQLite。当前基线以 `make verify` 和 `make compose-check` 为验收入口；后者从空 MySQL 数据库重建并验证容器内发布闭环。
+## 功能概览
 
-- Go 后端入口和 `/healthz`。
-- MySQL 配置加载和 migration runner；`MIGRATION_AUTO=false` 可跳过启动自动迁移，`MIGRATION_CHECK_ONLY=true` 只检查待执行 migration 后退出。
-- React/Vite 前端工作台。
-- 用户名密码登录与 HttpOnly JWT 会话；未登录访问业务 API 会被拒绝。
-- 本地 Compose 首次启动会创建管理员；默认账号为 `admin`，默认密码为 `ai-pub-dev-admin`。请通过 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 覆盖，生产环境必须提供自己的值。
-- 核心 MySQL 表结构。
-- 项目、服务、版本、环境、服务器、服务器组、部署目标、用户和访问密钥（API Key）基础 API。
-- 用户启用/禁用，禁用用户不能确认发布。
-- 访问密钥明文只在创建响应返回一次。
-- Bearer API Key 支持读取基础库存、发布单和部署记录，并分别校验 `inventory:read`、`release:read`、`deploy:read` scope。
-- Bearer API Key 支持创建、确认和回滚非生产发布单，并校验 `release:create`、`release:confirm`、`release:rollback` scope；生产确认必须使用管理员会话。
-- Bearer API Key 支持发布前 preflight、驳回和取消，并分别校验 `release:create`、`release:confirm` scope。
-- Bearer API Key 管理基础配置、API Key、凭据和通知时校验 `admin:write` scope。
-- API Key 调用写入发布事件 `api_key_id` 审计字段。
-- 发布单幂等键重复提交返回首次发布单，关键字段变化返回 409 冲突。
-- 发布单 preflight、创建、确认入队、驳回和取消。
-- 发布单确认和取消重复提交会返回当前状态，不重复创建执行记录或事件。
-- Preflight 对缺少制品地址的版本给出 warning，并阻断覆盖 `AI_PUB_*` 系统变量的部署目标。
-- 已入队发布取消时同步取消发布记录，避免取消后仍显示为 queued。
-- 非生产本人确认、生产管理员确认、环境冻结阻断、运行中发布阻断。
-- 环境冻结会阻断新发布，并暂停该环境已 queued 发布被 Worker 领取。
-- 发布单关键动作审计事件，包括已有发布单预检、确认、驳回、取消、执行、回滚和通知投递结果。
-- Mock/Dry-run 执行器。
-- Mock/Dry-run 和 SSH 执行器注入标准发布环境变量，包括版本号、commit 和制品地址。
-- 内置 Worker 领取 queued 发布记录、执行服务器任务、聚合 success/failed/partial，并在 fail-fast 后标记未执行服务器为 skipped。
-- Worker 领取任务时检查目标服务器占用，避免同一服务器同时进入多个 running 发布。
-- 发布记录和服务器日志读取 API。
-- 发布记录保存部署目标和服务器执行快照，Worker 按入队时快照执行。
-- 凭据加密存储和凭据列表 API，列表不返回 secret。
-- SSH 私钥执行器基础路径，支持超时、stdout/stderr 采集、错误分类和脱敏。
-- 企业微信机器人 webhook 通知配置。
-- 通知配置启用/禁用、测试发送和发送记录。
-- 生产待管理员确认、发布失败和回滚申请通知，通知发送结果写入发布事件流，通知失败不阻塞发布主流程。
-- MySQL 8 容器启动、自动 migration 和完整 Mock 发布闭环验证。
-- 回滚候选和回滚发布单。
-- 服务器当前版本视图。
-- 运维摘要 `/ops/summary`。
-- 前端支持初始化 Mock 配置、创建发布单、预检、确认入队、驳回、取消、创建回滚单、模拟失败发布。
-- 前端支持发布前预检结果展示。
-- 前端支持手动创建项目、服务、版本、环境、服务器、发布目标、确认用户、环境发布保护、通知配置、凭据、访问密钥和发布日志查看。
-- 前端支持创建服务器组，并使用 `server_group` 作为发布目标。
-- 前端支持通知测试和通知投递查看。
-- 前端以当前登录用户作为发布创建、确认、驳回、取消和回滚的操作者，不再允许通过页面切换确认身份。
-- 普通用户可在“个人访问密钥”页面管理自己的密钥；管理员可管理全部集成访问密钥，普通用户不能指定或操作其他用户的密钥。
-- 前端发布中心和发布记录支持按当前服务/环境、状态筛选。
-- 本地功能验证脚本覆盖驳回、取消、成功发布、服务器组发布、partial/skipped、失败发布、重新发布、回滚、日志和事件。
+- Web 管理界面：工作台、发布中心、发布详情、发布记录、配置、系统管理和个人访问密钥。
+- 发布闭环：发布单创建、preflight、本人/管理员确认、排队、执行、状态聚合、驳回、取消、重试和回滚。
+- 环境保护：生产环境固定需要管理员确认，非生产环境由发起人确认；环境可冻结发布。
+- 执行器：内置 Mock/Dry-run 和 SSH 执行器，SSH 支持私钥、密码认证和单跳网关。
+- 多服务器发布：支持服务器组，按顺序执行并 fail-fast，未执行服务器标记为 `skipped`。
+- 版本登记：外部 CI 可通过 `version:write` API Key 登记服务版本和 OCI 制品地址。
+- 审计与通知：关键发布动作写入事件流，支持企业微信机器人 webhook 通知和投递记录。
+- API Key：按 scope 授权 `inventory:read`、`release:*`、`deploy:read`、`version:write`、`admin:write` 等能力。
 
-后续优先做缺陷修复和少量交互打磨。真实 SSH 私钥与密码登录发布、企业微信机器人 webhook 发送均已完成测试验证；凭据能力增强仍可后续扩展。
+## 技术栈
 
-## 容器启动
+- 后端：Go、`net/http`、`database/sql`、显式 SQL repository。
+- 数据库：MySQL 8 是唯一受支持的运行时数据库。
+- 前端：React、TypeScript、Vite、Ant Design。
+- 本地与验收：Docker Compose 启动 MySQL、后端、前端和一次性验收容器。
 
-需要 OrbStack 或 Docker Desktop。MySQL 不暴露宿主机端口，后端仅在 Compose 网络中运行；只有前端映射到 `127.0.0.1:18080`（可通过 `APP_PORT` 覆盖）。
+SQLite 仅用于 Go 单元测试中的内存 schema，不是开发、验收或生产运行时。
+
+## 快速开始
+
+需要 Docker Desktop 或 OrbStack。
 
 ```bash
 docker compose up --build -d
 open http://127.0.0.1:18080/
 ```
 
+本地 Compose 默认只暴露前端端口 `127.0.0.1:18080`，前端会反向代理 `/api` 到容器内后端。首次启动会创建管理员：
+
+- 用户名：`admin`
+- 密码：`ai-pub-dev-admin`
+
+这些默认值只适合本地体验。共享环境或生产环境请先复制并调整 `.env.example`：
+
+```bash
+cp .env.example .env
+docker compose --env-file .env up --build -d
+```
+
 ## 验证
 
 ```bash
-make verify        # Go 单元测试与前端构建检查
-make compose-check # MySQL 8 + 后端 + 前端 + 容器内发布闭环
+make verify
+make compose-check
 ```
 
-停止并删除验收数据：
+- `make verify`：运行 Go 测试、前端 lint 和生产构建。
+- `make compose-check`：清理验证 profile 的数据卷，从空 MySQL 数据库启动容器并执行端到端发布闭环。
+
+清理本地验收环境：
 
 ```bash
 make compose-down
 ```
 
-## 已有 API
+## 生产部署提醒
 
-基础路径为 `/api/v1`：
+当前仓库提供的是最小可运行容器化部署基线。生产上线前至少应确认：
 
-- `GET/POST /projects`
-- `POST /auth/login`
-- `GET /auth/me`
-- `POST /auth/logout`
-- `GET/PATCH /projects/{id}`
-- `GET/POST /services`
-- `GET/PATCH /services/{id}`
-- `GET/POST /services/{id}/versions`
-- `GET/POST /environments`
-- `PATCH /environments/{id}`
-- `GET/POST /servers`
-- `PATCH /servers/{id}`
-- `POST /servers/test`
-- `POST /servers/{id}/test`
-- `GET/POST /server-groups`
-- `PATCH /server-groups/{id}`
-- `GET/POST /deployment-targets`
-- `PATCH /deployment-targets/{id}`
-- `GET/POST /users`
-- `PATCH /users/{id}`
-- `GET/POST /api-keys`
-- `PATCH/DELETE /api-keys/{id}`
-- `GET/POST /credentials`
-- `PATCH/DELETE /credentials/{id}`
-- `GET/POST /notification-configs`
-- `PATCH/DELETE /notification-configs/{id}`
-- `POST /notification-configs/{id}/test`
-- `GET /notification-deliveries`
-- `POST /release-requests/preflight`
-- `GET/POST /release-requests`
-- `GET /release-requests/{id}`
-- `POST /release-requests/{id}/preflight`
-- `POST /release-requests/{id}/confirm`
-- `POST /release-requests/{id}/reject`
-- `POST /release-requests/{id}/cancel`
-- `GET /release-requests/{id}/events`
-- `GET /release-requests/{id}/rollback-candidates`
-- `POST /release-requests/{id}/rollback`
-- `POST /release-requests/{id}/retry`
-- `GET /deploy-records`
-- `GET /deploy-records/{id}`
-- `GET /deploy-records/{id}/server-logs`
-- `GET /server-deployment-states`
-- `GET /ops/summary`
+- 设置 `APP_ENV=prod`。
+- 设置强随机 `APP_ENCRYPTION_KEY` 和 `JWT_SECRET`，不要使用开发默认值。
+- 设置自己的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD`，并在首次登录后妥善轮换管理员密码。
+- 使用独立 MySQL 8 实例并备份数据库。
+- 通过反向代理提供 HTTPS、访问控制和日志留存。
+- 保护 SSH 凭据、企业微信 webhook、API Key 和 `.env` 文件，不要提交到版本库。
+- 发布前运行 `make verify` 和 `make compose-check`。
 
-## 数据库与 PostgreSQL 边界
+## 常用环境变量
 
-当前运行时只支持 MySQL 8。默认由启动中的后端自动执行 migration；对已由发布流程完成迁移的环境可设置 `MIGRATION_AUTO=false` 跳过执行，或设置 `MIGRATION_CHECK_ONLY=true` 只检查待执行项后退出。业务层通过 repository 访问数据库，不使用 ORM；SQL 必须集中在 repository，禁止将 MySQL 专属语法扩散到 app、worker 或 HTTP 层。
+| 变量 | 说明 |
+| --- | --- |
+| `APP_PORT` | Compose 暴露的前端端口，默认 `18080` |
+| `APP_ENV` | 运行环境，生产使用 `prod` |
+| `MYSQL_DSN` | 后端 MySQL DSN，Compose 内部已预置 |
+| `APP_ENCRYPTION_KEY` | 凭据和 webhook 加密 key，生产必填 |
+| `JWT_SECRET` | 登录会话签名 key，生产必填 |
+| `BOOTSTRAP_ADMIN_USERNAME` | 首个管理员用户名 |
+| `BOOTSTRAP_ADMIN_PASSWORD` | 首个管理员密码，首次创建或补齐密码时必填 |
+| `MIGRATION_AUTO` | 是否启动时自动执行 migration，默认 `true` |
+| `MIGRATION_CHECK_ONLY` | 只检查待执行 migration 后退出，默认 `false` |
+| `WORKER_ENABLED` | 是否启动内置 Worker，默认 `true` |
 
-项目开源后如需 PostgreSQL，应新增 `migrations/postgres`、PostgreSQL 连接与 repository 适配，并以同一套容器验收用例验证；不在当前版本维护或宣称 PostgreSQL 支持。
+## API
 
-## SSH 能力边界
+基础路径为 `/api/v1`，健康检查为 `/healthz`。主要资源包括：
 
-当前 SSH 执行器不新增 Go SSH 依赖，使用系统 `ssh` 命令执行私钥或密码发布。密码认证使用进程生命周期内的 `SSH_ASKPASS` helper，不出现在命令行、API 响应、审计事件或发布日志；凭据始终从加密存储读取。
+- 认证：`/auth/login`、`/auth/me`、`/auth/logout`
+- 基础配置：`/projects`、`/services`、`/services/{id}/versions`、`/environments`、`/servers`、`/server-groups`、`/deployment-targets`
+- 管理对象：`/users`、`/api-keys`、`/credentials`、`/notification-configs`、`/notification-deliveries`
+- 版本登记：`/version-registrations`
+- 发布：`/release-requests`、`/release-requests/{id}/preflight`、`/confirm`、`/reject`、`/cancel`、`/rollback`、`/retry`、`/events`
+- 执行记录：`/deploy-records`、`/deploy-records/{id}/server-logs`、`/server-deployment-states`
+- 运维摘要：`/ops/summary`
+
+详细接口、状态机和权限边界见 [docs/api-design.md](docs/api-design.md)。
 
 ## 文档
 
-技术文档索引见 [docs/README.md](docs/README.md)。
+- [技术文档索引](docs/README.md)
+- [本地功能验证](docs/local-verification.md)
+- [MVP 完成审查](docs/development-completion-audit.md)
+- [产品需求文档](project-requirements.md)
 
-开发完成审查见 [docs/development-completion-audit.md](docs/development-completion-audit.md)。
+## 当前边界
 
-本地功能验证见 [docs/local-verification.md](docs/local-verification.md)。
+- 仅支持 MySQL 8 运行时；PostgreSQL 需作为独立方言扩展，不在当前版本宣称支持。
+- 不提供多租户、复杂 RBAC、审批流、运行中紧急停止、高并发或多实例 Worker 能力。
+- 审计目标是关键动作可追溯、可查询，不设计不可篡改账本。
+- Jenkins、Kubernetes、ArgoCD、Webhook 等执行器是后续扩展，不是第一版内置能力。
+
+## License
+
+MIT License. See [LICENSE](LICENSE).

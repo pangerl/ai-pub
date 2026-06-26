@@ -29,9 +29,9 @@ internal/domain         # 领域对象、状态机、聚合规则
 internal/repository     # SQL、事务与未来数据库方言边界
 internal/executor       # Mock/Dry-run、SSH 执行器
 internal/worker         # 队列领取、执行调度、心跳、状态修复
-internal/audit          # 事件写入和查询
 internal/migration      # MySQL migration runner
 internal/notification   # 通知事件和渠道发送
+internal/auth           # 密码哈希、登录会话和 token
 internal/config         # 配置加载和校验
 internal/crypto         # 凭据加密、hash、脱敏
 ```
@@ -252,9 +252,13 @@ tick
 | `APP_ENV` | `dev` / `test` / `prod` |
 | `HTTP_ADDR` | 监听地址 |
 | `MYSQL_DSN` | MySQL DSN |
-| `APP_ENCRYPTION_KEY` | 凭据加密 key |
-| `JWT_SECRET` | 登录 token key |
+| `APP_ENCRYPTION_KEY` | 凭据和 webhook 加密 key，生产必填 |
+| `JWT_SECRET` | 登录 token key，生产必填 |
+| `BOOTSTRAP_ADMIN_USERNAME` | 首个管理员用户名 |
+| `BOOTSTRAP_ADMIN_PASSWORD` | 首个管理员密码，首次创建或补齐密码时必填 |
 | `MIGRATION_AUTO` | 是否自动 migration |
+| `MIGRATION_CHECK_ONLY` | 只检查待执行 migration 后退出 |
+| `WORKER_ENABLED` | 是否启动内置 Worker |
 
 ## 13. 验证要求
 
