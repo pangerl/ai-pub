@@ -75,7 +75,8 @@ import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as f:
-    items = json.load(f)["data"]
+    data = json.load(f)["data"]
+items = data.get("items", data) if isinstance(data, dict) else data
 field, value = sys.argv[2], sys.argv[3]
 print(sum(1 for item in items if str(item.get(field)) == value))
 PY
@@ -87,7 +88,8 @@ import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as f:
-    items = json.load(f)["data"]
+    data = json.load(f)["data"]
+items = data.get("items", data) if isinstance(data, dict) else data
 field, value, output = sys.argv[2], sys.argv[3], sys.argv[4]
 for item in items:
     if str(item.get(field)) == value:
