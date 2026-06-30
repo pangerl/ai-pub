@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -67,6 +68,33 @@ func TestInventoryCRUDAndAPIKeyPlaintextOnce(t *testing.T) {
 	}
 	if version.ID == "" || target.ID == "" {
 		t.Fatal("expected created version and target ids")
+	}
+}
+
+func TestServerResultJSONUsesAPIFieldNames(t *testing.T) {
+	exitCode := 0
+	raw, err := json.Marshal(ServerResult{
+		Status:       "success",
+		ExitCode:     &exitCode,
+		DurationMS:   12,
+		LogOutput:    "ok",
+		ErrorCode:    "connect_failed",
+		ErrorMessage: "failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"status", "exit_code", "duration_ms", "log_output", "error_code", "error_message"} {
+		if _, ok := body[key]; !ok {
+			t.Fatalf("expected API field %q in %s", key, raw)
+		}
+	}
+	if _, ok := body["Status"]; ok {
+		t.Fatalf("server result must not expose Go field names: %s", raw)
 	}
 }
 

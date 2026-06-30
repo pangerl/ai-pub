@@ -49,12 +49,12 @@ type ClaimedDeploy struct {
 }
 
 type ServerResult struct {
-	Status       string
-	ExitCode     *int
-	DurationMS   int
-	LogOutput    string
-	ErrorCode    string
-	ErrorMessage string
+	Status       string `json:"status"`
+	ExitCode     *int   `json:"exit_code,omitempty"`
+	DurationMS   int    `json:"duration_ms"`
+	LogOutput    string `json:"log_output,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 type RecoveredDeploy struct {
