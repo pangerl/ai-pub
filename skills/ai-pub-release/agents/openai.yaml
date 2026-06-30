@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Pub 发布"
+  short_description: "通过 AI Pub Agent API 创建和跟踪发布单"
+  default_prompt: "Use $ai-pub-release to create an AI Pub release request for a service version."

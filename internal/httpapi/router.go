@@ -90,6 +90,14 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /api/v1/deploy-records/{id}/server-logs", listServerDeployLogs(store))
 	mux.HandleFunc("GET /api/v1/server-deployment-states", listServerDeploymentStates(store))
 	mux.HandleFunc("GET /api/v1/ops/summary", withOptionalAPIKeyScope(store, "deploy:read", opsSummary(store)))
+	mux.HandleFunc("GET /api/v1/agent/services", agentListServices(store))
+	mux.HandleFunc("GET /api/v1/agent/environments", agentListEnvironments(store))
+	mux.HandleFunc("GET /api/v1/agent/services/{id}/versions", agentListServiceVersions(store))
+	mux.HandleFunc("GET /api/v1/agent/deployment-targets", agentListDeploymentTargets(store))
+	mux.HandleFunc("POST /api/v1/agent/release-intents/preflight", agentPreflightRelease(releases, store))
+	mux.HandleFunc("POST /api/v1/agent/release-requests", agentCreateRelease(releases, store))
+	mux.HandleFunc("POST /api/v1/agent/release-requests/{id}/confirm", agentConfirmRelease(releases, store))
+	mux.HandleFunc("GET /api/v1/agent/release-requests/{id}/summary", agentReleaseSummary(releases, store))
 	return requestID(requireSessionOrAPIKey(store, deps.Config.JWTSecret, mux))
 }
 

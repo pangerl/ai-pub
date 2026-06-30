@@ -97,10 +97,13 @@ make compose-down
 - 管理对象：`/users`、`/api-keys`、`/credentials`、`/notification-configs`、`/notification-deliveries`
 - 版本登记：`/version-registrations`
 - 发布：`/release-requests`、`/release-requests/{id}/preflight`、`/confirm`、`/reject`、`/cancel`、`/rollback`、`/retry`、`/events`
+- Agent 发版：`/agent/services`、`/agent/environments`、`/agent/release-intents/preflight`、`/agent/release-requests`、`/summary`
 - 执行记录：`/deploy-records`、`/deploy-records/{id}/server-logs`、`/server-deployment-states`
 - 运维摘要：`/ops/summary`
 
 详细接口、状态机和权限边界见 [docs/api-design.md](docs/api-design.md)。
+
+仓库内置 Codex skill：[skills/ai-pub-release](skills/ai-pub-release)，用于通过 Agent API 创建、确认和跟踪发布单。
 
 ## 文档
 

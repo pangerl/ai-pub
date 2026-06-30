@@ -80,6 +80,7 @@ Idempotency-Key: xxx
 
 - `user`
 - `api_key`
+- `ai_agent`
 - `system`
 
 认证方式：
@@ -304,7 +305,30 @@ POST /release-requests/{id}/preflight
 
 回滚发布单复用同一套 preflight、环境发布保护、确认、审计流程。
 
-## 9. 发布记录和日志 API
+## 9. Agent API
+
+Agent API 是业务 API 的薄封装，用于降低 AI 调用复杂度，不是第二套发布流程。
+
+| 方法 | 路径 | 说明 | scope |
+|------|------|------|------|
+| `GET` | `/agent/services` | 服务候选，支持 `q`/`query` 和 `project_id` | `inventory:read` |
+| `GET` | `/agent/environments` | 环境候选，支持 `q`/`query` | `inventory:read` |
+| `GET` | `/agent/services/{id}/versions` | 服务版本候选，支持 `q`/`query` | `inventory:read` |
+| `GET` | `/agent/deployment-targets` | 部署目标候选，支持 `service_id` 和 `environment_id` | `inventory:read` |
+| `POST` | `/agent/release-intents/preflight` | 发布意图 preflight | `release:create` |
+| `POST` | `/agent/release-requests` | Agent 创建发布单 | `release:create` |
+| `POST` | `/agent/release-requests/{id}/confirm` | Agent 确认发布单 | `release:confirm` |
+| `GET` | `/agent/release-requests/{id}/summary` | 终端友好的发布单摘要 | `release:read` |
+
+约束：
+
+- 候选接口返回多个结果时，Agent 不应替用户猜测。
+- 创建发布单时服务端固定写入 `source=ai_agent`；普通客户端不能通过请求体伪造来源。
+- Agent metadata 只保存最小审计上下文：`agent_name`、`skill_version`、`intent_summary`、`client_request_id`、`conversation_ref`。
+- Agent API 仍复用同一个发布单应用服务、preflight、确认、队列、审计和权限校验。
+- Agent 不能独立确认生产发布；生产发布必须等待管理员确认。
+
+## 10. 发布记录和日志 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -313,13 +337,13 @@ POST /release-requests/{id}/preflight
 | `GET` | `/deploy-records/{id}/server-logs` | 服务器日志 |
 | `GET` | `/server-deployment-states` | 当前运行版本视图 |
 
-## 10. 环境发布保护 API
+## 11. 环境发布保护 API
 
 通过管理员接口 `PATCH /environments/{id}` 更新 `release_frozen`。环境响应同时返回 `is_production` 和 `release_frozen`；不提供独立策略或冻结 API。
 
-## 11. 通知配置 API
+## 12. 通知配置 API
 
-### 11.1 凭据
+### 12.1 凭据
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -330,7 +354,7 @@ POST /release-requests/{id}/preflight
 
 凭据校验：服务器创建/更新时，`auth_type != none` 必须引用存在且启用的凭据，否则返回 `400`。删除凭据的引用检查与删除在单事务内完成，避免并发先查后删。
 
-### 11.2 通知
+### 12.2 通知
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -341,11 +365,11 @@ POST /release-requests/{id}/preflight
 | `POST` | `/notification-configs/{id}/test` | 测试发送 |
 | `GET` | `/notification-deliveries` | 发送记录 |
 
-### 11.3 删除边界
+### 12.3 删除边界
 
 已被发布链路引用的实体（项目、服务、版本、环境、服务器、服务器组、部署目标、用户）只能禁用，不能删除，以保护审计完整性。未被引用的辅助实体（凭据、通知配置、访问密钥）支持删除；凭据删除需通过服务器引用校验。
 
-## 12. 运维接口
+## 13. 运维接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -354,7 +378,7 @@ POST /release-requests/{id}/preflight
 
 运维接口不得泄漏密钥和敏感配置。
 
-## 13. 验证要求
+## 14. 验证要求
 
 - Web 前端可只依赖 API 文档完成发布闭环。
 - 每个关键写接口都有鉴权、幂等和事件写入说明。
