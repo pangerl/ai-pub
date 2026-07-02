@@ -523,6 +523,21 @@ func (s Store) CreateDeploymentTarget(ctx context.Context, item domain.Deploymen
 		}
 		item.SSH.DeploymentTargetID = item.ID
 	}
+	if item.ExecutorType == "k8s" {
+		if item.K8s == nil {
+			return domain.DeploymentTarget{}, fmt.Errorf("k8s deployment target config is required")
+		}
+		if item.ArtifactType != "oci_image" {
+			return domain.DeploymentTarget{}, fmt.Errorf("k8s deployment target requires artifact_type oci_image")
+		}
+		if strings.TrimSpace(item.K8s.ClusterID) == "" || strings.TrimSpace(item.K8s.Namespace) == "" || strings.TrimSpace(item.K8s.DeploymentName) == "" || strings.TrimSpace(item.K8s.ContainerName) == "" {
+			return domain.DeploymentTarget{}, fmt.Errorf("k8s deployment target requires cluster_id, namespace, deployment_name and container_name")
+		}
+		item.K8s.DeploymentTargetID = item.ID
+		if _, err := s.GetK8sCluster(ctx, item.K8s.ClusterID); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+	}
 	item.Enabled = true
 	item.CreatedAt = now
 	item.UpdatedAt = now
@@ -542,6 +557,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 INSERT INTO ssh_deployment_targets (deployment_target_id, target_type, target_ref_id, script_path, working_dir, env_vars)
 VALUES (?, ?, ?, ?, ?, ?)`,
 			item.ID, item.SSH.TargetType, item.SSH.TargetRefID, item.SSH.ScriptPath, item.SSH.WorkingDir, item.SSH.EnvVars); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+	}
+	if item.K8s != nil {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO k8s_deployment_targets (deployment_target_id, cluster_id, namespace, deployment_name, container_name)
+VALUES (?, ?, ?, ?, ?)`,
+			item.ID, item.K8s.ClusterID, item.K8s.Namespace, item.K8s.DeploymentName, item.K8s.ContainerName); err != nil {
 			return domain.DeploymentTarget{}, err
 		}
 	}
@@ -633,6 +656,27 @@ func (s Store) UpdateDeploymentTarget(ctx context.Context, id string, item domai
 		item.SSH.DeploymentTargetID = id
 		existing.SSH = item.SSH
 	}
+	if item.K8s != nil {
+		if strings.TrimSpace(item.K8s.ClusterID) == "" || strings.TrimSpace(item.K8s.Namespace) == "" || strings.TrimSpace(item.K8s.DeploymentName) == "" || strings.TrimSpace(item.K8s.ContainerName) == "" {
+			return domain.DeploymentTarget{}, fmt.Errorf("k8s deployment target requires cluster_id, namespace, deployment_name and container_name")
+		}
+		item.K8s.DeploymentTargetID = id
+		if _, err := s.GetK8sCluster(ctx, item.K8s.ClusterID); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+		existing.K8s = item.K8s
+	}
+	if existing.ExecutorType == "k8s" {
+		if existing.ArtifactType != "oci_image" {
+			return domain.DeploymentTarget{}, fmt.Errorf("k8s deployment target requires artifact_type oci_image")
+		}
+		if existing.K8s == nil {
+			return domain.DeploymentTarget{}, fmt.Errorf("k8s deployment target config is required")
+		}
+	}
+	if existing.ExecutorType == "ssh" && existing.SSH == nil {
+		return domain.DeploymentTarget{}, fmt.Errorf("ssh deployment target config is required")
+	}
 	if item.TimeoutSeconds != 0 {
 		existing.TimeoutSeconds = item.TimeoutSeconds
 	}
@@ -650,14 +694,25 @@ WHERE id = ?`,
 		existing.ExecutorType, existing.ArtifactType, existing.TimeoutSeconds, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id); err != nil {
 		return domain.DeploymentTarget{}, err
 	}
-	if existing.SSH != nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM ssh_deployment_targets WHERE deployment_target_id = ?`, id); err != nil {
-			return domain.DeploymentTarget{}, err
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ssh_deployment_targets WHERE deployment_target_id = ?`, id); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM k8s_deployment_targets WHERE deployment_target_id = ?`, id); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	if existing.ExecutorType == "ssh" && existing.SSH != nil {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO ssh_deployment_targets (deployment_target_id, target_type, target_ref_id, script_path, working_dir, env_vars)
 VALUES (?, ?, ?, ?, ?, ?)`,
 			id, existing.SSH.TargetType, existing.SSH.TargetRefID, existing.SSH.ScriptPath, existing.SSH.WorkingDir, existing.SSH.EnvVars); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+	}
+	if existing.ExecutorType == "k8s" && existing.K8s != nil {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO k8s_deployment_targets (deployment_target_id, cluster_id, namespace, deployment_name, container_name)
+VALUES (?, ?, ?, ?, ?)`,
+			id, existing.K8s.ClusterID, existing.K8s.Namespace, existing.K8s.DeploymentName, existing.K8s.ContainerName); err != nil {
 			return domain.DeploymentTarget{}, err
 		}
 	}
@@ -676,9 +731,20 @@ FROM ssh_deployment_targets WHERE deployment_target_id = ?`, item.ID)
 		if item.ExecutorType == "ssh" {
 			return normalizeNotFound(err)
 		}
+	} else {
+		item.SSH = &ssh
+	}
+	row = s.db.QueryRowContext(ctx, `
+SELECT deployment_target_id, cluster_id, namespace, deployment_name, container_name
+FROM k8s_deployment_targets WHERE deployment_target_id = ?`, item.ID)
+	var k8s domain.K8sDeploymentTarget
+	if err := row.Scan(&k8s.DeploymentTargetID, &k8s.ClusterID, &k8s.Namespace, &k8s.DeploymentName, &k8s.ContainerName); err != nil {
+		if item.ExecutorType == "k8s" {
+			return normalizeNotFound(err)
+		}
 		return nil
 	}
-	item.SSH = &ssh
+	item.K8s = &k8s
 	return nil
 }
 

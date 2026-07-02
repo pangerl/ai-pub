@@ -26,6 +26,7 @@ func NewService(store repository.Store, credentials app.CredentialService, notif
 		executors: executor.NewRegistry(map[string]executor.Executor{
 			"mock": executor.Mock{},
 			"ssh":  executor.SSH{Credentials: credentials},
+			"k8s":  executor.K8s{Credentials: credentials, Clusters: store},
 		}),
 		credentials:   credentials,
 		notifications: notifications,
@@ -78,18 +79,18 @@ func (s Service) RunOnce(ctx context.Context) error {
 		Message:          "发布执行已开始",
 	})
 	failed := false
-	for _, server := range claimed.Servers {
+	for _, target := range claimed.ExecutionTargets {
 		if failed {
 			break
 		}
-		if err := s.store.MarkTargetRunning(ctx, claimed.Record.ID, server.ID); err != nil {
+		if err := s.store.MarkTargetRunning(ctx, claimed.Record.ID, target.RefID); err != nil {
 			return err
 		}
-		result := s.execute(execCtx, claimed, server)
+		result := s.execute(execCtx, claimed, target)
 		if err := heartbeatError(heartbeatErrors); err != nil {
 			return err
 		}
-		if err := s.store.MarkTargetFinished(ctx, claimed.Record.ID, server.ID, result); err != nil {
+		if err := s.store.MarkTargetFinished(ctx, claimed.Record.ID, target.RefID, result); err != nil {
 			return err
 		}
 		_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
@@ -98,7 +99,7 @@ func (s Service) RunOnce(ctx context.Context) error {
 			EventType:        "target_finished",
 			ActorType:        "system",
 			ActorID:          s.workerID,
-			Message:          result.Status + ": " + server.Name,
+			Message:          result.Status + ": " + target.Name,
 		})
 		failed = result.Status == "failed"
 	}
@@ -173,7 +174,7 @@ func heartbeatError(errs <-chan error) error {
 	}
 }
 
-func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, server domain.Server) repository.ServerResult {
+func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, target repository.ExecutionTarget) repository.ServerResult {
 	item, ok := s.executors.Get(claimed.Target.ExecutorType)
 	if !ok {
 		code := 1
@@ -184,7 +185,12 @@ func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, 
 			ErrorMessage: "unsupported executor: " + claimed.Target.ExecutorType,
 		}
 	}
+	server, serverFound := findClaimedServer(claimed.Servers, target)
 	var gateway *domain.Server
+	if claimed.Target.ExecutorType == "ssh" && !serverFound {
+		code := 1
+		return repository.ServerResult{Status: "failed", ExitCode: &code, ErrorCode: "target_not_found", ErrorMessage: "server target is not available"}
+	}
 	if claimed.Target.ExecutorType == "ssh" && server.GatewayID != "" {
 		item, err := s.store.GetServer(ctx, server.GatewayID)
 		if err != nil {
@@ -194,11 +200,21 @@ func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, 
 		gateway = &item
 	}
 	return item.Execute(ctx, executor.Request{
-		Release: claimed.Release,
-		Record:  claimed.Record,
-		Target:  claimed.Target,
-		Version: claimed.Version,
-		Server:  server,
-		Gateway: gateway,
+		Release:         claimed.Release,
+		Record:          claimed.Record,
+		Target:          claimed.Target,
+		Version:         claimed.Version,
+		ExecutionTarget: target,
+		Server:          server,
+		Gateway:         gateway,
 	})
+}
+
+func findClaimedServer(servers []domain.Server, target repository.ExecutionTarget) (domain.Server, bool) {
+	for _, server := range servers {
+		if server.ID == target.RefID {
+			return server, true
+		}
+	}
+	return domain.Server{ID: target.RefID, Name: target.Name}, false
 }

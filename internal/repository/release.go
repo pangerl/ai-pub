@@ -262,11 +262,7 @@ func (s Store) ConfirmAndQueueRelease(ctx context.Context, releaseID string, use
 	defer tx.Rollback()
 
 	now := nowUTC()
-	serverIDs, err := s.expandTargetServersTx(ctx, tx, target)
-	if err != nil {
-		return domain.ReleaseRequest{}, domain.DeployRecord{}, err
-	}
-	servers, err := s.getServersByIDsTx(ctx, tx, serverIDs)
+	executionTargets, servers, err := s.expandTargetExecutionsTx(ctx, tx, target)
 	if err != nil {
 		return domain.ReleaseRequest{}, domain.DeployRecord{}, err
 	}
@@ -275,8 +271,8 @@ func (s Store) ConfirmAndQueueRelease(ctx context.Context, releaseID string, use
 		ReleaseRequestID: releaseID,
 		Status:           "queued",
 		ExecutorType:     target.ExecutorType,
-		TargetSnapshot:   targetSnapshot(target, servers),
-		TotalTargets:     len(serverIDs),
+		TargetSnapshot:   targetSnapshot(target, servers, executionTargets),
+		TotalTargets:     len(executionTargets),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -303,20 +299,10 @@ worker_id, error_summary, created_at, updated_at
 		record.ID, record.ReleaseRequestID, record.Status, record.ExecutorType, record.TargetSnapshot, record.TotalTargets, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)); err != nil {
 		return domain.ReleaseRequest{}, domain.DeployRecord{}, err
 	}
-	for _, serverID := range serverIDs {
-		var serverName string
-		for _, server := range servers {
-			if server.ID == serverID {
-				serverName = server.Name
-				break
-			}
-		}
-		if serverName == "" {
-			serverName = serverID
-		}
+	for _, target := range executionTargets {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO deploy_target_logs (id, deploy_record_id, target_type, target_ref_id, target_name, status, log_output, error_code, error_message)
-VALUES (?, ?, 'server', ?, ?, 'queued', '', '', '')`, domain.NewID("tlog"), record.ID, serverID, serverName); err != nil {
+VALUES (?, ?, ?, ?, ?, 'queued', '', '', '')`, domain.NewID("tlog"), record.ID, target.Type, target.RefID, target.Name); err != nil {
 			return domain.ReleaseRequest{}, domain.DeployRecord{}, err
 		}
 	}
@@ -391,6 +377,38 @@ func (s Store) expandTargetServersTx(ctx context.Context, tx *sql.Tx, target dom
 	return ids, nil
 }
 
+func (s Store) expandTargetExecutionsTx(ctx context.Context, tx *sql.Tx, target domain.DeploymentTarget) ([]ExecutionTarget, []domain.Server, error) {
+	switch target.ExecutorType {
+	case "k8s":
+		if target.K8s == nil {
+			return nil, nil, fmt.Errorf("k8s deployment target config is required")
+		}
+		refID := K8sDeploymentRef(*target.K8s)
+		return []ExecutionTarget{{
+			Type:  "k8s_deployment",
+			RefID: refID,
+			Name:  target.K8s.Namespace + "/" + target.K8s.DeploymentName + ":" + target.K8s.ContainerName,
+		}}, nil, nil
+	case "mock":
+		if target.SSH == nil || target.SSH.TargetRefID == "" {
+			return []ExecutionTarget{{
+				Type:  "mock",
+				RefID: target.ID,
+				Name:  "Mock target",
+			}}, nil, nil
+		}
+	}
+	serverIDs, err := s.expandTargetServersTx(ctx, tx, target)
+	if err != nil {
+		return nil, nil, err
+	}
+	servers, err := s.getServersByIDsTx(ctx, tx, serverIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return executionTargetsFromServers(servers), servers, nil
+}
+
 func (s Store) getServersByIDsTx(ctx context.Context, tx *sql.Tx, ids []string) ([]domain.Server, error) {
 	servers := make([]domain.Server, 0, len(ids))
 	for _, id := range ids {
@@ -411,15 +429,32 @@ FROM servers WHERE id = ?`, id)
 
 type deployTargetSnapshot struct {
 	DeploymentTarget domain.DeploymentTarget `json:"deployment_target"`
-	Servers          []domain.Server         `json:"servers"`
+	Servers          []domain.Server         `json:"servers,omitempty"`
+	ExecutionTargets []ExecutionTarget       `json:"execution_targets,omitempty"`
 }
 
-func targetSnapshot(target domain.DeploymentTarget, servers []domain.Server) string {
-	body, err := json.Marshal(deployTargetSnapshot{DeploymentTarget: target, Servers: servers})
+func targetSnapshot(target domain.DeploymentTarget, servers []domain.Server, executionTargets []ExecutionTarget) string {
+	body, err := json.Marshal(deployTargetSnapshot{DeploymentTarget: target, Servers: servers, ExecutionTargets: executionTargets})
 	if err != nil {
 		return "{}"
 	}
 	return string(body)
+}
+
+func executionTargetsFromServers(servers []domain.Server) []ExecutionTarget {
+	targets := make([]ExecutionTarget, 0, len(servers))
+	for _, server := range servers {
+		name := server.Name
+		if name == "" {
+			name = server.ID
+		}
+		targets = append(targets, ExecutionTarget{Type: "server", RefID: server.ID, Name: name})
+	}
+	return targets
+}
+
+func K8sDeploymentRef(target domain.K8sDeploymentTarget) string {
+	return target.ClusterID + "/" + target.Namespace + "/" + target.DeploymentName + "/" + target.ContainerName
 }
 
 func scanReleaseRequest(row rowScanner) (domain.ReleaseRequest, error) {

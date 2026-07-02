@@ -29,8 +29,8 @@ func (s CredentialService) Create(ctx context.Context, input CreateCredentialInp
 	if input.Secret == "" {
 		return domain.Credential{}, errors.New("secret is required")
 	}
-	if input.Type != "password" && input.Type != "private_key" {
-		return domain.Credential{}, errors.New("credential type must be password or private_key")
+	if input.Type != "password" && input.Type != "private_key" && input.Type != "kubeconfig" {
+		return domain.Credential{}, errors.New("credential type must be password, private_key or kubeconfig")
 	}
 	enc, err := s.box.Encrypt(input.Secret)
 	if err != nil {

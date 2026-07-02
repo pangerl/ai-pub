@@ -303,7 +303,7 @@ if [[ "$(json_get "${partial_deploy_file}" data.status)" != "partial" ]]; then
   cat "${partial_deploy_file}" >&2
   exit 1
 fi
-if [[ "$(json_get "${partial_deploy_file}" data.success_servers)" != "1" || "$(json_get "${partial_deploy_file}" data.failed_servers)" != "1" || "$(json_get "${partial_deploy_file}" data.skipped_servers)" != "1" ]]; then
+if [[ "$(json_get "${partial_deploy_file}" data.success_targets)" != "1" || "$(json_get "${partial_deploy_file}" data.failed_targets)" != "1" || "$(json_get "${partial_deploy_file}" data.skipped_targets)" != "1" ]]; then
   cat "${partial_deploy_file}" >&2
   exit 1
 fi

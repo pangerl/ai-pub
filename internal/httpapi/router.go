@@ -11,6 +11,7 @@ import (
 	"ai-pub/internal/app"
 	"ai-pub/internal/config"
 	"ai-pub/internal/crypto"
+	"ai-pub/internal/executor"
 	"ai-pub/internal/repository"
 )
 
@@ -26,7 +27,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	credentials := app.NewCredentialService(store, box)
 	infrastructure := app.NewInfrastructureService(store, credentials)
 	notifications := app.NewNotificationService(store, box, nil)
-	releases := app.NewReleaseService(store, notifications)
+	releases := app.NewReleaseService(store, notifications).WithK8sPreflightChecker(executor.K8s{Credentials: credentials, Clusters: store})
 	mux.HandleFunc("GET /healthz", healthz(deps))
 	mux.HandleFunc("POST /api/v1/auth/login", login(store, deps.Config.JWTSecret))
 	mux.HandleFunc("GET /api/v1/auth/me", currentUser())
@@ -52,6 +53,10 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /api/v1/server-groups", withOptionalAPIKeyScope(store, "inventory:read", listServerGroups(store)))
 	mux.HandleFunc("POST /api/v1/server-groups", withAdmin(store, deps.Config.JWTSecret, createServerGroup(store)))
 	mux.HandleFunc("PATCH /api/v1/server-groups/{id}", withAdmin(store, deps.Config.JWTSecret, patchServerGroup(store)))
+	mux.HandleFunc("GET /api/v1/k8s-clusters", withOptionalAPIKeyScope(store, "inventory:read", listK8sClusters(infrastructure)))
+	mux.HandleFunc("POST /api/v1/k8s-clusters", withAdmin(store, deps.Config.JWTSecret, createK8sCluster(infrastructure)))
+	mux.HandleFunc("PATCH /api/v1/k8s-clusters/{id}", withAdmin(store, deps.Config.JWTSecret, patchK8sCluster(infrastructure)))
+	mux.HandleFunc("DELETE /api/v1/k8s-clusters/{id}", withAdmin(store, deps.Config.JWTSecret, deleteK8sCluster(infrastructure)))
 	mux.HandleFunc("GET /api/v1/deployment-targets", withOptionalAPIKeyScope(store, "inventory:read", listDeploymentTargets(store)))
 	mux.HandleFunc("POST /api/v1/deployment-targets", withAdmin(store, deps.Config.JWTSecret, createDeploymentTarget(store)))
 	mux.HandleFunc("PATCH /api/v1/deployment-targets/{id}", withAdmin(store, deps.Config.JWTSecret, patchDeploymentTarget(store)))

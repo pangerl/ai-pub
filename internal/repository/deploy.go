@@ -41,11 +41,18 @@ type PagedDeploys struct {
 }
 
 type ClaimedDeploy struct {
-	Release domain.ReleaseRequest
-	Record  domain.DeployRecord
-	Target  domain.DeploymentTarget
-	Version domain.ServiceVersion
-	Servers []domain.Server
+	Release          domain.ReleaseRequest
+	Record           domain.DeployRecord
+	Target           domain.DeploymentTarget
+	Version          domain.ServiceVersion
+	Servers          []domain.Server
+	ExecutionTargets []ExecutionTarget
+}
+
+type ExecutionTarget struct {
+	Type  string `json:"type"`
+	RefID string `json:"ref_id"`
+	Name  string `json:"name"`
 }
 
 type ServerResult struct {
@@ -138,13 +145,13 @@ UPDATE release_requests SET status = 'running', updated_at = ? WHERE id = ? AND 
 	if err != nil {
 		return ClaimedDeploy{}, err
 	}
-	target, servers, err := s.resolveDeploySnapshot(ctx, record, release.DeploymentTargetID)
+	target, servers, executionTargets, err := s.resolveDeploySnapshot(ctx, record, release.DeploymentTargetID)
 	if err != nil {
 		return ClaimedDeploy{}, err
 	}
 	record.Status = "running"
 	record.WorkerID = workerID
-	return ClaimedDeploy{Release: release, Record: record, Target: target, Version: version, Servers: servers}, nil
+	return ClaimedDeploy{Release: release, Record: record, Target: target, Version: version, Servers: servers, ExecutionTargets: executionTargets}, nil
 }
 
 func (s Store) HeartbeatDeploy(ctx context.Context, deployRecordID, workerID string) error {
@@ -247,22 +254,38 @@ WHERE id = ? AND status = 'running'`,
 	return recovered, nil
 }
 
-func (s Store) resolveDeploySnapshot(ctx context.Context, record domain.DeployRecord, targetID string) (domain.DeploymentTarget, []domain.Server, error) {
+func (s Store) resolveDeploySnapshot(ctx context.Context, record domain.DeployRecord, targetID string) (domain.DeploymentTarget, []domain.Server, []ExecutionTarget, error) {
 	var snapshot deployTargetSnapshot
-	if err := json.Unmarshal([]byte(record.TargetSnapshot), &snapshot); err == nil && snapshot.DeploymentTarget.ID != "" && len(snapshot.Servers) > 0 {
-		return snapshot.DeploymentTarget, snapshot.Servers, nil
+	if err := json.Unmarshal([]byte(record.TargetSnapshot), &snapshot); err == nil && snapshot.DeploymentTarget.ID != "" {
+		if len(snapshot.ExecutionTargets) > 0 {
+			return snapshot.DeploymentTarget, snapshot.Servers, snapshot.ExecutionTargets, nil
+		}
+		if len(snapshot.Servers) > 0 {
+			return snapshot.DeploymentTarget, snapshot.Servers, executionTargetsFromServers(snapshot.Servers), nil
+		}
 	}
 	var legacyTarget domain.DeploymentTarget
 	if err := json.Unmarshal([]byte(record.TargetSnapshot), &legacyTarget); err == nil && legacyTarget.ID != "" {
 		servers, err := s.ListDeployServers(ctx, record.ID)
-		return legacyTarget, servers, err
+		if err != nil {
+			return domain.DeploymentTarget{}, nil, nil, err
+		}
+		targets, err := s.ListDeployExecutionTargets(ctx, record.ID)
+		if err != nil {
+			return domain.DeploymentTarget{}, nil, nil, err
+		}
+		return legacyTarget, servers, targets, nil
 	}
 	target, err := s.GetDeploymentTarget(ctx, targetID)
 	if err != nil {
-		return domain.DeploymentTarget{}, nil, err
+		return domain.DeploymentTarget{}, nil, nil, err
 	}
 	servers, err := s.ListDeployServers(ctx, record.ID)
-	return target, servers, err
+	if err != nil {
+		return domain.DeploymentTarget{}, nil, nil, err
+	}
+	targets, err := s.ListDeployExecutionTargets(ctx, record.ID)
+	return target, servers, targets, err
 }
 
 func (s Store) ListDeployServers(ctx context.Context, deployRecordID string) ([]domain.Server, error) {
@@ -280,6 +303,25 @@ ORDER BY l.id ASC`, deployRecordID)
 	for rows.Next() {
 		item, err := scanServer(rows)
 		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s Store) ListDeployExecutionTargets(ctx context.Context, deployRecordID string) ([]ExecutionTarget, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT target_type, target_ref_id, target_name
+FROM deploy_target_logs WHERE deploy_record_id = ? ORDER BY id ASC`, deployRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExecutionTarget{}
+	for rows.Next() {
+		var item ExecutionTarget
+		if err := rows.Scan(&item.Type, &item.RefID, &item.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

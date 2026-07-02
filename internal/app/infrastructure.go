@@ -14,8 +14,51 @@ type InfrastructureService struct {
 	credentials CredentialService
 }
 
+type CreateK8sClusterInput struct {
+	Name          string `json:"name"`
+	CredentialRef string `json:"credential_ref"`
+}
+
+type UpdateK8sClusterInput struct {
+	Name          *string `json:"name"`
+	CredentialRef *string `json:"credential_ref"`
+	Enabled       *bool   `json:"enabled"`
+}
+
 func NewInfrastructureService(store repository.Store, credentials CredentialService) InfrastructureService {
 	return InfrastructureService{store: store, credentials: credentials}
+}
+
+func (s InfrastructureService) ListK8sClusters(ctx context.Context) ([]domain.K8sCluster, error) {
+	return s.store.ListK8sClusters(ctx)
+}
+
+func (s InfrastructureService) CreateK8sCluster(ctx context.Context, input CreateK8sClusterInput) (domain.K8sCluster, error) {
+	return s.store.CreateK8sCluster(ctx, domain.K8sCluster{
+		Name:          input.Name,
+		CredentialRef: input.CredentialRef,
+	})
+}
+
+func (s InfrastructureService) UpdateK8sCluster(ctx context.Context, id string, input UpdateK8sClusterInput) (domain.K8sCluster, error) {
+	existing, err := s.store.GetK8sCluster(ctx, id)
+	if err != nil {
+		return domain.K8sCluster{}, err
+	}
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.CredentialRef != nil {
+		existing.CredentialRef = *input.CredentialRef
+	}
+	if input.Enabled != nil {
+		existing.Enabled = *input.Enabled
+	}
+	return s.store.UpdateK8sCluster(ctx, id, existing)
+}
+
+func (s InfrastructureService) DeleteK8sCluster(ctx context.Context, id string) error {
+	return s.store.DeleteK8sCluster(ctx, id)
 }
 
 func (s InfrastructureService) TestServer(ctx context.Context, id string) (domain.Server, repository.ServerResult, error) {

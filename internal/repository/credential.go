@@ -8,8 +8,8 @@ import (
 	"ai-pub/internal/domain"
 )
 
-// ErrCredentialInUse 表示凭据仍被服务器引用，不能删除。
-var ErrCredentialInUse = errors.New("credential is still referenced by servers")
+// ErrCredentialInUse 表示凭据仍被基础设施引用，不能删除。
+var ErrCredentialInUse = errors.New("credential is still referenced")
 
 type CredentialSecret struct {
 	Credential domain.Credential
@@ -98,8 +98,8 @@ UPDATE credentials SET name = ?, description = ?, enabled = ?, updated_at = ? WH
 	return existing, nil
 }
 
-// DeleteCredential 在单事务内检查服务器引用并删除凭据。
-// MySQL 下用 SELECT ... FOR UPDATE 对引用该凭据的服务器行加锁，阻塞并发的服务器插入/引用写入，
+// DeleteCredential 在单事务内检查基础设施引用并删除凭据。
+// MySQL 下用 SELECT ... FOR UPDATE 对引用该凭据的基础设施行加锁，阻塞并发的插入/引用写入，
 // 真正消除"计数后并发插入同一 credential_ref"的 TOCTOU 窗口。
 // SQLite（测试用）不支持 FOR UPDATE，退化为普通 SELECT；测试为单连接无并发，不影响覆盖。
 func (s Store) DeleteCredential(ctx context.Context, id string) error {
@@ -108,16 +108,20 @@ func (s Store) DeleteCredential(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback()
-	countSQL := `SELECT COUNT(*) FROM servers WHERE credential_ref = ?`
-	if isMySQL(s.db) {
-		countSQL = `SELECT COUNT(*) FROM servers WHERE credential_ref = ? FOR UPDATE`
-	}
-	var count int
-	if err := tx.QueryRowContext(ctx, countSQL, id).Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return ErrCredentialInUse
+	for _, countSQL := range []string{
+		`SELECT COUNT(*) FROM servers WHERE credential_ref = ?`,
+		`SELECT COUNT(*) FROM k8s_clusters WHERE credential_ref = ?`,
+	} {
+		if isMySQL(s.db) {
+			countSQL += ` FOR UPDATE`
+		}
+		var count int
+		if err := tx.QueryRowContext(ctx, countSQL, id).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrCredentialInUse
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM credentials WHERE id = ?`, id); err != nil {
 		return err

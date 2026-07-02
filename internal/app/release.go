@@ -17,8 +17,9 @@ import (
 var ociDigestPattern = regexp.MustCompile(`^[^@]+@sha256:[0-9a-fA-F]{64}$`)
 
 type ReleaseService struct {
-	store    repository.Store
-	notifier releaseNotifier
+	store        repository.Store
+	notifier     releaseNotifier
+	k8sPreflight k8sPreflightChecker
 }
 
 type Actor struct {
@@ -29,6 +30,10 @@ type Actor struct {
 
 type releaseNotifier interface {
 	NotifyAll(context.Context, NotificationEvent)
+}
+
+type k8sPreflightChecker interface {
+	CheckDeployment(ctx context.Context, target domain.K8sDeploymentTarget) (code string, message string, err error)
 }
 
 type PreflightInput struct {
@@ -109,6 +114,11 @@ func NewReleaseService(store repository.Store, notifiers ...releaseNotifier) Rel
 	return ReleaseService{store: store, notifier: notifier}
 }
 
+func (s ReleaseService) WithK8sPreflightChecker(checker k8sPreflightChecker) ReleaseService {
+	s.k8sPreflight = checker
+	return s
+}
+
 func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (PreflightResult, error) {
 	env, err := s.store.GetEnvironment(ctx, input.EnvironmentID)
 	if err != nil {
@@ -146,6 +156,7 @@ func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (Pr
 	if conflicts := reservedEnvConflicts(sshEnvVars); len(conflicts) > 0 {
 		result.block("reserved_env_var", "部署目标环境变量不能覆盖系统变量: "+strings.Join(conflicts, ", "))
 	}
+	s.preflightK8sTarget(ctx, target, &result)
 	// 制品约束由部署目标的 artifact_type 决定：oci_image 强制要求 digest 引用；
 	// version_only 仅在缺失时给 warning，由脚本按版本号自行解析制品。
 	switch target.ArtifactType {
@@ -178,6 +189,54 @@ func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (Pr
 		result.Items = append(result.Items, PreflightItem{Code: "target_ready", Level: "pass", Message: "部署目标配置完整"})
 	}
 	return result, nil
+}
+
+func (s ReleaseService) preflightK8sTarget(ctx context.Context, target domain.DeploymentTarget, result *PreflightResult) {
+	if target.ExecutorType != "k8s" {
+		return
+	}
+	if target.ArtifactType != "oci_image" {
+		result.block("artifact_type_invalid", "K8s 部署目标必须使用 oci_image 制品类型")
+	}
+	if target.K8s == nil {
+		result.block("k8s_target_missing", "K8s 部署目标配置缺失")
+		return
+	}
+	if strings.TrimSpace(target.K8s.Namespace) == "" {
+		result.block("namespace_missing", "K8s 部署目标必须填写 namespace")
+	}
+	if strings.TrimSpace(target.K8s.DeploymentName) == "" {
+		result.block("deployment_name_missing", "K8s 部署目标必须填写 Deployment 名称")
+	}
+	if strings.TrimSpace(target.K8s.ContainerName) == "" {
+		result.block("container_name_missing", "K8s 部署目标必须填写容器名称")
+	}
+	cluster, err := s.store.GetK8sCluster(ctx, target.K8s.ClusterID)
+	if err != nil {
+		result.block("cluster_not_available", "K8s 集群不可用")
+		return
+	}
+	if !cluster.Enabled {
+		result.block("cluster_not_available", "K8s 集群已禁用")
+	}
+	credential, err := s.store.GetCredential(ctx, cluster.CredentialRef)
+	if err != nil {
+		result.block("cluster_not_available", "K8s 集群 kubeconfig 凭据不可用")
+		return
+	}
+	if !credential.Enabled || credential.Type != "kubeconfig" {
+		result.block("cluster_not_available", "K8s 集群 kubeconfig 凭据不可用")
+	}
+	if result.Result == "pass" && s.k8sPreflight != nil {
+		code, message, err := s.k8sPreflight.CheckDeployment(ctx, *target.K8s)
+		if err != nil {
+			result.block("cluster_not_available", "K8s 集群检查失败")
+			return
+		}
+		if code != "" {
+			result.block(code, message)
+		}
+	}
 }
 
 func reservedEnvConflicts(raw string) []string {

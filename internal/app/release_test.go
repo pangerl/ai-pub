@@ -259,6 +259,168 @@ func TestReleaseServiceRetryCreatesNewReleaseAndPreflight(t *testing.T) {
 	}
 }
 
+func TestK8sReleasePreflightAndQueueUsesDeploymentTargetLog(t *testing.T) {
+	_, store := newReleaseTestStore(t)
+	ctx := context.Background()
+	service := NewReleaseService(store)
+
+	project, err := store.CreateProject(ctx, domain.Project{Name: "供应链系统", Slug: "supply-chain-k8s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := store.CreateService(ctx, domain.Service{ProjectID: project.ID, Name: "订单服务", Slug: "order-api-k8s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := store.CreateServiceVersion(ctx, domain.ServiceVersion{
+		ServiceID:   svc.ID,
+		Version:     "v1.0.0",
+		ArtifactURL: "registry.example.com/order-api@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ctx, domain.Environment{Name: "测试环境", Slug: "test-k8s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := store.CreateCredential(ctx, domain.Credential{Name: "test kubeconfig", Type: "kubeconfig"}, "encrypted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, err := store.CreateK8sCluster(ctx, domain.K8sCluster{Name: "test-cluster", CredentialRef: credential.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.CreateDeploymentTarget(ctx, domain.DeploymentTarget{
+		ServiceID:     svc.ID,
+		EnvironmentID: env.ID,
+		ExecutorType:  "k8s",
+		ArtifactType:  "oci_image",
+		K8s: &domain.K8sDeploymentTarget{
+			ClusterID:      cluster.ID,
+			Namespace:      "default",
+			DeploymentName: "order-api",
+			ContainerName:  "app",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.CreateUser(ctx, domain.User{Username: "alice-k8s", DisplayName: "Alice", Role: "employee"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, preflight, err := service.Create(ctx, CreateReleaseInput{
+		PreflightInput: PreflightInput{
+			ServiceID:          svc.ID,
+			EnvironmentID:      env.ID,
+			ServiceVersionID:   version.ID,
+			DeploymentTargetID: target.ID,
+		},
+		CreatedByType: "user",
+		CreatedByID:   user.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflight.Result != "pass" {
+		t.Fatalf("expected preflight pass, got %#v", preflight)
+	}
+	confirmed, err := service.Confirm(ctx, created.ID, ConfirmInput{UserID: user.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Status != "queued" {
+		t.Fatalf("expected queued release, got %#v", confirmed)
+	}
+	records, err := store.ListDeployRecords(ctx, repository.DeployListFilter{ReleaseRequestID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records.Items) != 1 || records.Items[0].TotalTargets != 1 || records.Items[0].ExecutorType != "k8s" {
+		t.Fatalf("expected one queued k8s target, got %#v", records.Items)
+	}
+	logs, err := store.ListDeployTargetLogs(ctx, records.Items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].TargetType != "k8s_deployment" || logs[0].TargetRefID == "" {
+		t.Fatalf("expected k8s deployment target log, got %#v", logs)
+	}
+}
+
+func TestK8sReleasePreflightBlocksDeploymentCheck(t *testing.T) {
+	_, store := newReleaseTestStore(t)
+	ctx := context.Background()
+	service := NewReleaseService(store).WithK8sPreflightChecker(fakeK8sPreflightChecker{code: "container_not_found", message: "missing container"})
+
+	project, err := store.CreateProject(ctx, domain.Project{Name: "供应链系统", Slug: "supply-chain-k8s-check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := store.CreateService(ctx, domain.Service{ProjectID: project.ID, Name: "订单服务", Slug: "order-api-k8s-check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := store.CreateServiceVersion(ctx, domain.ServiceVersion{
+		ServiceID:   svc.ID,
+		Version:     "v1.0.0",
+		ArtifactURL: "registry.example.com/order-api@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ctx, domain.Environment{Name: "测试环境", Slug: "test-k8s-check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := store.CreateCredential(ctx, domain.Credential{Name: "test kubeconfig", Type: "kubeconfig"}, "encrypted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, err := store.CreateK8sCluster(ctx, domain.K8sCluster{Name: "test-cluster-check", CredentialRef: credential.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.CreateDeploymentTarget(ctx, domain.DeploymentTarget{
+		ServiceID:     svc.ID,
+		EnvironmentID: env.ID,
+		ExecutorType:  "k8s",
+		ArtifactType:  "oci_image",
+		K8s: &domain.K8sDeploymentTarget{
+			ClusterID:      cluster.ID,
+			Namespace:      "default",
+			DeploymentName: "order-api",
+			ContainerName:  "app",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := service.Preflight(ctx, PreflightInput{
+		ServiceID:          svc.ID,
+		EnvironmentID:      env.ID,
+		ServiceVersionID:   version.ID,
+		DeploymentTargetID: target.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflight.Result != "block" || !hasPreflightItem(preflight, "container_not_found", "block") {
+		t.Fatalf("expected container_not_found block, got %#v", preflight)
+	}
+}
+
+type fakeK8sPreflightChecker struct {
+	code    string
+	message string
+}
+
+func (f fakeK8sPreflightChecker) CheckDeployment(context.Context, domain.K8sDeploymentTarget) (string, string, error) {
+	return f.code, f.message, nil
+}
+
 func TestReleaseServiceEnvironmentFreezeBlocksConfirmation(t *testing.T) {
 	_, store := newReleaseTestStore(t)
 	service := NewReleaseService(store)

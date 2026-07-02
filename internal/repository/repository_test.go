@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -136,6 +137,64 @@ func TestApplicationServerCanUseOnlyAnEnabledGateway(t *testing.T) {
 	gateway.Role = "application"
 	if _, err := store.UpdateServer(ctx, gateway.ID, gateway); err == nil {
 		t.Fatal("expected used gateway to retain gateway role")
+	}
+}
+
+func TestK8sClusterAndDeploymentTargetPersistence(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	credential, err := store.CreateCredential(ctx, domain.Credential{Name: "test kubeconfig", Type: "kubeconfig"}, "encrypted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, err := store.CreateK8sCluster(ctx, domain.K8sCluster{Name: "test-cluster", CredentialRef: credential.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := store.CreateProject(ctx, domain.Project{Name: "供应链系统", Slug: "supply-chain-k8s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := store.CreateService(ctx, domain.Service{ProjectID: project.ID, Name: "订单服务", Slug: "order-api-k8s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ctx, domain.Environment{Name: "测试环境", Slug: "test-k8s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.CreateDeploymentTarget(ctx, domain.DeploymentTarget{
+		ServiceID:      service.ID,
+		EnvironmentID:  env.ID,
+		ExecutorType:   "k8s",
+		ArtifactType:   "oci_image",
+		TimeoutSeconds: 180,
+		K8s: &domain.K8sDeploymentTarget{
+			ClusterID:      cluster.ID,
+			Namespace:      "default",
+			DeploymentName: "order-api",
+			ContainerName:  "app",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetDeploymentTarget(ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.K8s == nil || got.K8s.ClusterID != cluster.ID || got.K8s.DeploymentName != "order-api" {
+		t.Fatalf("expected k8s config to round-trip, got %#v", got)
+	}
+	if got.SSH != nil {
+		t.Fatalf("k8s target must not include ssh config: %#v", got.SSH)
+	}
+	if err := store.DeleteK8sCluster(ctx, cluster.ID); !errors.Is(err, ErrK8sClusterInUse) {
+		t.Fatalf("expected cluster in-use error, got %v", err)
+	}
+	if err := store.DeleteCredential(ctx, credential.ID); !errors.Is(err, ErrCredentialInUse) {
+		t.Fatalf("expected credential in-use error, got %v", err)
 	}
 }
 

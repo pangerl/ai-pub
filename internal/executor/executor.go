@@ -18,12 +18,13 @@ import (
 )
 
 type Request struct {
-	Release domain.ReleaseRequest
-	Record  domain.DeployRecord
-	Target  domain.DeploymentTarget
-	Version domain.ServiceVersion
-	Server  domain.Server
-	Gateway *domain.Server
+	Release         domain.ReleaseRequest
+	Record          domain.DeployRecord
+	Target          domain.DeploymentTarget
+	Version         domain.ServiceVersion
+	ExecutionTarget repository.ExecutionTarget
+	Server          domain.Server
+	Gateway         *domain.Server
 }
 
 type Executor interface {
