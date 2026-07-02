@@ -14,8 +14,7 @@ import (
 
 type Service struct {
 	store         repository.Store
-	mock          executor.Mock
-	ssh           executor.SSH
+	executors     executor.Registry
 	credentials   app.CredentialService
 	notifications *app.NotificationService
 	workerID      string
@@ -23,9 +22,11 @@ type Service struct {
 
 func NewService(store repository.Store, credentials app.CredentialService, notifications *app.NotificationService, workerID string) Service {
 	return Service{
-		store:         store,
-		mock:          executor.Mock{},
-		ssh:           executor.SSH{Credentials: credentials},
+		store: store,
+		executors: executor.NewRegistry(map[string]executor.Executor{
+			"mock": executor.Mock{},
+			"ssh":  executor.SSH{Credentials: credentials},
+		}),
 		credentials:   credentials,
 		notifications: notifications,
 		workerID:      workerID,
@@ -173,34 +174,8 @@ func heartbeatError(errs <-chan error) error {
 }
 
 func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, server domain.Server) repository.ServerResult {
-	switch claimed.Target.ExecutorType {
-	case "mock":
-		return s.mock.Execute(ctx, executor.Request{
-			Release: claimed.Release,
-			Record:  claimed.Record,
-			Target:  claimed.Target,
-			Version: claimed.Version,
-			Server:  server,
-		})
-	case "ssh":
-		var gateway *domain.Server
-		if server.GatewayID != "" {
-			item, err := s.store.GetServer(ctx, server.GatewayID)
-			if err != nil {
-				code := 1
-				return repository.ServerResult{Status: "failed", ExitCode: &code, ErrorCode: "connect_failed", ErrorMessage: "gateway server is not available"}
-			}
-			gateway = &item
-		}
-		return s.ssh.Execute(ctx, executor.Request{
-			Release: claimed.Release,
-			Record:  claimed.Record,
-			Target:  claimed.Target,
-			Version: claimed.Version,
-			Server:  server,
-			Gateway: gateway,
-		})
-	default:
+	item, ok := s.executors.Get(claimed.Target.ExecutorType)
+	if !ok {
 		code := 1
 		return repository.ServerResult{
 			Status:       "failed",
@@ -209,4 +184,21 @@ func (s Service) execute(ctx context.Context, claimed repository.ClaimedDeploy, 
 			ErrorMessage: "unsupported executor: " + claimed.Target.ExecutorType,
 		}
 	}
+	var gateway *domain.Server
+	if claimed.Target.ExecutorType == "ssh" && server.GatewayID != "" {
+		item, err := s.store.GetServer(ctx, server.GatewayID)
+		if err != nil {
+			code := 1
+			return repository.ServerResult{Status: "failed", ExitCode: &code, ErrorCode: "connect_failed", ErrorMessage: "gateway server is not available"}
+		}
+		gateway = &item
+	}
+	return item.Execute(ctx, executor.Request{
+		Release: claimed.Release,
+		Record:  claimed.Record,
+		Target:  claimed.Target,
+		Version: claimed.Version,
+		Server:  server,
+		Gateway: gateway,
+	})
 }

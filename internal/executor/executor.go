@@ -30,6 +30,23 @@ type Executor interface {
 	Execute(ctx context.Context, req Request) repository.ServerResult
 }
 
+type Registry struct {
+	items map[string]Executor
+}
+
+func NewRegistry(items map[string]Executor) Registry {
+	copied := make(map[string]Executor, len(items))
+	for key, item := range items {
+		copied[key] = item
+	}
+	return Registry{items: copied}
+}
+
+func (r Registry) Get(executorType string) (Executor, bool) {
+	item, ok := r.items[executorType]
+	return item, ok
+}
+
 type Mock struct{}
 
 func (Mock) Execute(ctx context.Context, req Request) repository.ServerResult {
