@@ -27,12 +27,14 @@ Service 1 -- n ServiceVersion
 ServiceVersion 1 -- n ServiceVersionEvent
 Service 1 -- n DeploymentTarget
 Environment 1 -- n DeploymentTarget
-DeploymentTarget n -- n ServerGroup/Server
+DeploymentTarget 1 -- 0..1 SSHDeploymentTarget
+DeploymentTarget 1 -- 0..1 KubernetesDeploymentTarget
+K8sCluster 1 -- n KubernetesDeploymentTarget
 
 ReleaseRequest 1 -- 0..1 DeployRecord
 ReleaseRequest 1 -- n ReleaseEvent
-DeployRecord 1 -- n ServerDeployLog
-Service + Environment + Server 1 -- 1 ServerDeploymentState
+DeployRecord 1 -- n DeployTargetLog
+Service + Environment + DeploymentTarget + ExecutionTarget 1 -- 1 DeploymentState
 
 ApiKey belongs to User
 NotificationConfig 1 -- n NotificationDelivery
@@ -119,7 +121,7 @@ NotificationConfig 1 -- n NotificationDelivery
 约束：
 
 - `(project_id, slug)` 唯一。
-- 服务不保存“当前版本”，当前版本由服务器部署状态聚合。
+- 服务不保存“当前版本”，当前版本由部署状态聚合。SSH 场景可按服务器展开，K8s 场景按部署目标展示。
 
 ### 4.5 ServiceVersion
 
@@ -218,7 +220,7 @@ NotificationConfig 1 -- n NotificationDelivery
 
 ### 4.9 DeploymentTarget
 
-用途：连接服务、环境、执行器和运行目标。
+用途：连接服务、环境、执行器和发布目标，是发布单选择目标的统一入口。
 
 关键字段：
 
@@ -227,25 +229,83 @@ NotificationConfig 1 -- n NotificationDelivery
 | `id` | 主键 |
 | `service_id` | 服务 |
 | `environment_id` | 环境 |
-| `executor_type` | `mock` 或 `ssh` |
-| `target_type` | `server` 或 `server_group` |
-| `target_ref_id` | 目标 ID |
-| `script_path` | SSH 脚本路径，可空 |
-| `working_dir` | 工作目录，可空 |
-| `env_vars` | JSON 文本 |
+| `executor_type` | `mock` / `ssh` / `k8s` |
 | `artifact_type` | `version_only` 或 `oci_image`，非空，默认 `version_only` |
-| `timeout_seconds` | 命令超时 |
+| `timeout_seconds` | 执行超时 |
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
 约束：
 
-- 第一版内置 `mock`、`ssh`。
-- 第一版运行目标只实现服务器和服务器组。
+- 第一版内置 `mock`、`ssh` 和 `k8s`。
+- SSH 专属字段不放在主表中，避免污染 K8s 和 Mock 语义。
 - `artifact_type=version_only` 允许脚本按版本号解析制品；`artifact_type=oci_image` 要求版本制品为 OCI digest，并由 preflight 阻断缺失或格式不符的制品。
+- K8s 部署目标强制 `artifact_type=oci_image`，只发布既有 Deployment 的指定容器镜像。
 - `(service_id, environment_id)` 可以有多个部署目标，但创建发布单时必须选择明确目标。
 
-### 4.10 发布保护
+### 4.10 SSHDeploymentTarget
+
+用途：保存 SSH executor 专属部署目标配置。
+
+关键字段：
+
+| 字段 | 说明 |
+|------|------|
+| `deployment_target_id` | 主键，引用 `deployment_targets.id` |
+| `target_type` | `server` 或 `server_group` |
+| `target_ref_id` | 服务器或服务器组 ID |
+| `script_path` | SSH 脚本路径 |
+| `working_dir` | 工作目录 |
+| `env_vars` | JSON 文本 |
+
+约束：
+
+- `executor_type=ssh` 的部署目标必须有对应 SSH 配置。
+- `target_type=server_group` 时执行前展开为稳定顺序的服务器目标。
+- 发布目标只能包含应用服务器，不能把网关作为脚本执行目标。
+
+### 4.11 K8sCluster
+
+用途：表示可用于 Kubernetes 发布的集群连接配置。
+
+关键字段：
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 主键 |
+| `name` | 集群名称 |
+| `credential_ref` | kubeconfig 凭据引用 |
+| `enabled` | 是否启用 |
+| `created_at` / `updated_at` | 时间 |
+
+约束：
+
+- 凭据复用 `credentials`，类型为 `kubeconfig`。
+- API 列表不得返回 kubeconfig 明文或 secret。
+- 集群被部署目标引用时不得删除。
+
+### 4.12 KubernetesDeploymentTarget
+
+用途：保存 K8s executor 的既有 Deployment 镜像发布配置。
+
+关键字段：
+
+| 字段 | 说明 |
+|------|------|
+| `deployment_target_id` | 主键，引用 `deployment_targets.id` |
+| `cluster_id` | Kubernetes 集群 |
+| `namespace` | 命名空间 |
+| `deployment_name` | Deployment 名称 |
+| `container_name` | 容器名称 |
+
+约束：
+
+- 第一版仅支持 Deployment，不支持 StatefulSet、DaemonSet、CronJob。
+- 不保存完整 YAML/Manifest，不支持 `kubectl apply -f` 语义。
+- 不保存或修改 replicas、resources、env、probe、volume、label、annotation、Service/Ingress 等运行参数。
+- 执行时只 patch 指定容器的 image，并等待 Deployment rollout 完成。
+
+### 4.13 发布保护
 
 发布保护直接归属 `Environment`，不单独建策略实体。
 
@@ -254,7 +314,7 @@ NotificationConfig 1 -- n NotificationDelivery
 - 已 queued 的发布在冻结期间暂停领取，running 发布继续执行。
 - 同服务同环境已有 running 发布时，默认阻断新的真实执行。
 
-### 4.11 ReleaseRequest
+### 4.14 ReleaseRequest
 
 用途：发布执行意图和门禁状态。
 
@@ -307,12 +367,12 @@ running -> failed
 
 约束：
 
-- 进入执行后，终态由 `DeployRecord` 和服务器日志聚合回写。
+- 进入执行后，终态由 `DeployRecord` 和执行目标日志聚合回写。
 - `partial` 在发布单摘要中按 `failed` 处理，并保留部分成功计数。
 - queued 前允许取消；running 后不提供系统级紧急停止入口。
 - 发布单不得绕过发布记录直接进入 `running/success/failed`。
 
-### 4.12 DeployRecord
+### 4.15 DeployRecord
 
 用途：真实执行记录。
 
@@ -325,10 +385,10 @@ running -> failed
 | `status` | 执行状态 |
 | `executor_type` | 执行器 |
 | `target_snapshot` | 部署目标执行快照 JSON 文本 |
-| `total_servers` | 服务器总数 |
-| `success_servers` | 成功数量 |
-| `failed_servers` | 失败数量 |
-| `skipped_servers` | 跳过数量 |
+| `total_targets` | 执行目标总数 |
+| `success_targets` | 成功目标数 |
+| `failed_targets` | 失败目标数 |
+| `skipped_targets` | 跳过目标数 |
 | `worker_id` | 当前 Worker |
 | `lease_expires_at` | 租约过期时间 |
 | `heartbeat_at` | 心跳时间 |
@@ -346,13 +406,14 @@ running -> failed
 
 聚合规则：
 
-- 全部服务器成功：`success`。
-- 全部失败或 skipped，且没有成功服务器：`failed`。
+- 全部目标成功：`success`。
+- 全部失败或 skipped，且没有成功目标：`failed`。
 - 至少一台成功，且有 failed 或 skipped：`partial`。
+- SSH 服务器组按服务器展开多个目标；K8s Deployment 发布生成一个目标。
 
-### 4.13 ServerDeployLog
+### 4.16 DeployTargetLog
 
-用途：单台服务器执行状态和日志。
+用途：单个执行目标的状态和日志。
 
 关键字段：
 
@@ -360,9 +421,11 @@ running -> failed
 |------|------|
 | `id` | 主键 |
 | `deploy_record_id` | 发布记录 |
-| `server_id` | 服务器 |
+| `target_type` | `server` / `server_group_member` / `k8s_deployment` / `mock` |
+| `target_ref_id` | 目标引用 ID |
+| `target_name` | 执行目标快照名称 |
 | `status` | `queued` / `running` / `success` / `failed` / `skipped` |
-| `exit_code` | 退出码，可空 |
+| `exit_code` | 进程类执行器退出码，可空 |
 | `started_at` / `finished_at` | 时间 |
 | `duration_ms` | 耗时 |
 | `log_output` | 日志文本或引用 |
@@ -372,12 +435,13 @@ running -> failed
 约束：
 
 - 日志不得包含未脱敏密码、私钥、token。
-- 发布记录被 Worker 领取后，未开始执行的服务器仍为 `queued`；仅在实际开始该服务器时进入 `running` 并写入 `started_at`。
-- 多服务器 fail-fast 后未执行服务器标记为 `skipped`。
+- 发布记录被 Worker 领取后，未开始执行的目标仍为 `queued`；仅在实际开始该目标时进入 `running` 并写入 `started_at`。
+- SSH 多服务器 fail-fast 后未执行目标标记为 `skipped`。
+- K8s 日志只记录发布目标、rollout 结果和脱敏错误，不输出 kubeconfig、token 或完整敏感错误上下文。
 
-### 4.14 ServerDeploymentState
+### 4.17 DeploymentState
 
-用途：服务器当前运行版本视图。
+用途：部署目标当前版本视图。
 
 关键字段：
 
@@ -386,17 +450,20 @@ running -> failed
 | `id` | 主键 |
 | `service_id` | 服务 |
 | `environment_id` | 环境 |
-| `server_id` | 服务器 |
+| `deployment_target_id` | 部署目标 |
+| `target_type` | 当前状态目标类型 |
+| `target_ref_id` | 目标引用 ID |
 | `service_version_id` | 当前版本 |
 | `deploy_record_id` | 来源发布记录 |
 | `updated_at` | 更新时间 |
 
 约束：
 
-- `(service_id, environment_id, server_id)` 唯一。
-- 环境级当前版本由服务器状态聚合得出；不一致时显示“混合版本”。
+- `(service_id, environment_id, deployment_target_id, target_type, target_ref_id)` 唯一。
+- SSH 场景 `target_ref_id` 为服务器 ID；K8s 场景可使用 `<cluster_id>/<namespace>/<deployment_name>/<container_name>`。
+- 环境级当前版本由部署状态聚合得出；不一致时显示“混合版本”。
 
-### 4.15 ReleaseEvent
+### 4.18 ReleaseEvent
 
 用途：关键动作追溯。
 
@@ -425,13 +492,13 @@ running -> failed
 - `release_rejected`
 - `release_cancelled`
 - `deploy_started`
-- `server_finished`
+- `target_finished`
 - `deploy_finished`
 - `rollback_requested`
 - `notification_sent`
 - `notification_failed`
 
-### 4.16 ServiceVersionEvent
+### 4.19 ServiceVersionEvent
 
 用途：服务版本登记与后续版本动作的独立审计；不关联发布单，不复用 `ReleaseEvent`。
 
@@ -450,7 +517,7 @@ running -> failed
 | `metadata` | JSON 文本 |
 | `created_at` | 创建时间 |
 
-### 4.17 NotificationConfig
+### 4.20 NotificationConfig
 
 用途：通知渠道配置。
 
@@ -465,7 +532,7 @@ running -> failed
 | `enabled` | 是否启用 |
 | `created_at` / `updated_at` | 时间 |
 
-### 4.18 NotificationDelivery
+### 4.21 NotificationDelivery
 
 用途：通知发送记录。
 
@@ -503,15 +570,21 @@ running -> failed
 - `(services.project_id, services.slug)` 唯一。
 - `(service_versions.service_id, service_versions.version)` 唯一。
 - `environments.slug` 唯一。
-- `(server_deployment_states.service_id, server_deployment_states.environment_id, server_deployment_states.server_id)` 唯一。
+- `(deployment_states.service_id, deployment_states.environment_id, deployment_states.deployment_target_id, deployment_states.target_type, deployment_states.target_ref_id)` 唯一。
+- `ssh_deployment_targets.deployment_target_id` 唯一。
+- `k8s_clusters.name` 唯一。
+- `k8s_deployment_targets.deployment_target_id` 唯一。
 - API Key `prefix` 可建索引，`key_hash` 唯一。
 - 发布单按 `status`、`service_id`、`environment_id`、`created_at` 建查询索引。
 - 发布记录按 `status`、`service_id`、`environment_id`、`created_at` 建查询索引。
+- 执行目标日志按 `deploy_record_id`、`target_type`、`target_ref_id` 建查询索引。
 - 事件按 `release_request_id`、`deploy_record_id`、`created_at` 建查询索引。
 
 ## 7. 验证要求
 
 - MySQL 8 migration 从空库执行成功。
-- 发布单、发布记录、服务器日志状态机单元测试通过。
+- 发布单、发布记录、执行目标日志状态机单元测试通过。
 - 基础 CRUD、审计事件写入和查询在 MySQL 8 下通过。
-- Mock/Dry-run 发布闭环能写入发布单、发布记录、服务器日志、服务器部署状态和事件。
+- Mock/Dry-run 发布闭环能写入发布单、发布记录、执行目标日志、部署状态和事件。
+- SSH 发布保持服务器/服务器组顺序 fail-fast 语义。
+- K8s 发布只更新既有 Deployment 指定容器镜像，不修改运行参数。

@@ -8,8 +8,9 @@
 
 - 业务逻辑集中在应用服务层，不散落在 API handler 或 Worker 中。
 - MySQL 8 是开发、验收和生产的唯一运行路径。
-- Mock/Dry-run 和 SSH 执行器遵守同一 contract。
+- Mock/Dry-run、SSH 和 K8s 执行器遵守同一 contract。
 - 支持发布单创建、preflight、确认、入队、执行、日志、回滚和通知。
+- K8s executor 只做既有 Deployment 指定容器镜像发布，不做 Manifest 管理、`apply`、扩缩容或运行参数变更。
 
 ## 2. 非目标
 
@@ -27,7 +28,7 @@ internal/httpapi        # REST API、middleware、auth
 internal/app            # 用例服务：发布单、preflight、确认、执行、回滚
 internal/domain         # 领域对象、状态机、聚合规则
 internal/repository     # SQL、事务与未来数据库方言边界
-internal/executor       # Mock/Dry-run、SSH 执行器
+internal/executor       # Mock/Dry-run、SSH、K8s 执行器
 internal/worker         # 队列领取、执行调度、心跳、状态修复
 internal/migration      # MySQL migration runner
 internal/notification   # 通知事件和渠道发送
@@ -65,7 +66,7 @@ HTTP request
 | `ConfirmService` | 本人确认、管理员确认、驳回 |
 | `DeployService` | 创建发布记录、生成执行快照、状态聚合 |
 | `WorkerService` | 领取任务、调执行器、心跳、状态修复 |
-| `InventoryService` | 项目、服务、版本、环境、服务器、部署目标 |
+| `InventoryService` | 项目、服务、版本、环境、服务器、K8s 集群、部署目标 |
 | `CredentialService` | 凭据加密、脱敏、SSH 配置读取 |
 | `NotificationService` | 通知事件生成、发送、失败记录 |
 | `AuditService` | 事件写入和查询 |
@@ -103,7 +104,7 @@ HTTP request
 3. 校验确认人权限。
 4. 更新发布单为 `queued`。
 5. 创建 `DeployRecord(queued)`。
-6. 展开目标服务器，创建 `ServerDeployLog(queued)`。
+6. 构建类型化执行快照，展开执行目标，创建 `DeployTargetLog(queued)`。
 7. 冻结部署目标执行快照。
 8. 写入确认和入队事件。
 
@@ -120,19 +121,19 @@ HTTP request
 
 1. 按创建时间选择 `queued` 发布记录。
 2. 确认发布单仍处于可执行状态。
-3. 确认目标服务器未被其他 running 发布占用；当前发布记录中 `queued` 和 `running` 的服务器都视为占用。
-4. 更新发布记录为 `running`，服务器日志保持 `queued`。
+3. 确认目标未被其他 running 发布占用；同服务同环境已有 running 发布时阻断新执行。SSH 的服务器目标可按 `target_ref_id` 做更细互斥。
+4. 更新发布记录为 `running`，目标日志保持 `queued`。
 5. 写入 Worker 标识、心跳和租约时间。
 6. 写入 `deploy_started` 事件。
 
 ### 6.5 执行结果回写
 
-多服务器按稳定顺序逐台执行。每台服务器真正开始执行时，先将对应 `ServerDeployLog` 从 `queued` 更新为 `running` 并记录开始时间；其余服务器继续保持 `queued`。每台服务器执行结束后事务内：
+多目标 executor 按稳定顺序逐个执行。目标真正开始执行时，先将对应 `DeployTargetLog` 从 `queued` 更新为 `running` 并记录开始时间；其余目标继续保持 `queued`。目标执行结束后事务内：
 
-1. 更新 `ServerDeployLog`。
+1. 更新 `DeployTargetLog`。
 2. 聚合当前 `DeployRecord` 计数。
-3. 必要时更新 `ServerDeploymentState`。
-4. 写入 `server_finished` 事件。
+3. 必要时更新 `DeploymentState`。
+4. 写入 `target_finished` 事件。
 
 整单结束时事务内：
 
@@ -159,8 +160,9 @@ tick
 - Worker 执行期间定期心跳。
 - 租约 TTL 不得小于命令执行超时时间。
 - 僵尸任务通过心跳超时识别，并标记失败或待人工处理。
-- 多服务器发布按顺序执行，某台失败后 fail-fast，未执行服务器标记 `skipped`。
-- 发布记录进入 `running` 不代表所有服务器已开始；服务器级日志以 `queued -> running -> 终态` 表示实际进度。
+- SSH 多服务器发布按顺序执行，某台失败后 fail-fast，未执行目标标记 `skipped`。
+- K8s Deployment 发布是单目标执行。
+- 发布记录进入 `running` 不代表所有目标已开始；目标日志以 `queued -> running -> 终态` 表示实际进度。
 
 ## 8. 执行器 contract
 
@@ -172,8 +174,9 @@ tick
 | `deploy_record` | 发布记录快照 |
 | `project` / `service` / `environment` | 基础上下文 |
 | `version` | 服务版本 |
-| `deployment_target` | 执行快照 |
-| `server` | 当前服务器 |
+| `deployment_target` | 部署目标通用快照 |
+| `plan` | 类型化执行快照 |
+| `target` | 当前执行目标 |
 | `env_vars` | 系统变量和部署目标变量 |
 | `timeout_seconds` | 超时 |
 | `attempt` | 尝试次数 |
@@ -201,6 +204,20 @@ tick
 - `exit_non_zero`
 - `internal_error`
 
+K8s executor 额外使用：
+
+- `cluster_not_available`
+- `namespace_not_found`
+- `deployment_not_found`
+- `container_not_found`
+- `image_invalid`
+- `permission_denied`
+- `rollout_timeout`
+- `rollout_failed`
+- `executor_error`
+
+执行快照必须是类型化结构，包含 `ExecutionTarget`、SSH 快照和 K8s Deployment 快照；Worker 不通过 `json.RawMessage` 解析未知 executor 配置。
+
 ## 9. Mock/Dry-run 执行器
 
 用途：
@@ -213,7 +230,7 @@ tick
 
 - 模拟成功。
 - 模拟失败。
-- 生成服务器级日志。
+- 生成最小执行目标日志。
 - 使用同一套变量注入和结果回写路径。
 
 ## 10. SSH 执行器
@@ -233,7 +250,29 @@ tick
 - 私钥、密码、token 不得进入 API 响应、事件和日志。
 - 网关通过 `ProxyCommand` 建立单跳隧道：网关认证与应用服务器认证分开读取，最终脚本始终在应用服务器上执行。
 
-## 11. MySQL 与 PostgreSQL 扩展边界
+## 11. K8s executor
+
+能力：
+
+- 读取 kubeconfig 凭据并连接 Kubernetes API。
+- 读取既有 Deployment，检查命名空间、Deployment 和容器存在。
+- 使用 patch 只更新指定容器的 `image` 为 `ServiceVersion.artifact_url`。
+- 等待 Deployment rollout 完成。
+
+边界：
+
+- 不 shell 调 `kubectl`。
+- 不保存完整 Deployment YAML，不支持 `kubectl apply -f`。
+- 不创建 Deployment、Service、Ingress、ConfigMap、Secret 等资源。
+- 不修改 replicas、resources、env、probe、volume、label、annotation、Service/Ingress 或调度策略。
+- 回滚通过创建指向旧 `ServiceVersion` 的回滚发布单完成，不调用 Kubernetes revision undo。
+
+安全要求：
+
+- kubeconfig 使用加密凭据存储。
+- 日志和错误不得输出 kubeconfig、token 或完整敏感错误上下文。
+
+## 12. MySQL 与 PostgreSQL 扩展边界
 
 - 使用 `database/sql`。
 - 业务 SQL 集中在 repository；MySQL 专属 SQL 只出现在 repository 或 migration。
@@ -243,7 +282,7 @@ tick
 - PostgreSQL 是后续开源扩展，不在当前运行时配置或测试矩阵中维护；接入时新增 `migrations/postgres` 和 repository 适配。
 - 当前不做高并发或多实例专项设计。
 
-## 12. 配置
+## 13. 配置
 
 关键环境变量：
 
