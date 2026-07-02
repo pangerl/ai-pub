@@ -276,7 +276,7 @@ func (s Store) ConfirmAndQueueRelease(ctx context.Context, releaseID string, use
 		Status:           "queued",
 		ExecutorType:     target.ExecutorType,
 		TargetSnapshot:   targetSnapshot(target, servers),
-		TotalServers:     len(serverIDs),
+		TotalTargets:     len(serverIDs),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -297,16 +297,26 @@ WHERE id = ? AND status = 'pending_confirm'`,
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO deploy_records (
-id, release_request_id, status, executor_type, target_snapshot, total_servers, success_servers, failed_servers, skipped_servers,
+id, release_request_id, status, executor_type, target_snapshot, total_targets, success_targets, failed_targets, skipped_targets,
 worker_id, error_summary, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', ?, ?)`,
-		record.ID, record.ReleaseRequestID, record.Status, record.ExecutorType, record.TargetSnapshot, record.TotalServers, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)); err != nil {
+		record.ID, record.ReleaseRequestID, record.Status, record.ExecutorType, record.TargetSnapshot, record.TotalTargets, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)); err != nil {
 		return domain.ReleaseRequest{}, domain.DeployRecord{}, err
 	}
 	for _, serverID := range serverIDs {
+		var serverName string
+		for _, server := range servers {
+			if server.ID == serverID {
+				serverName = server.Name
+				break
+			}
+		}
+		if serverName == "" {
+			serverName = serverID
+		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_deploy_logs (id, deploy_record_id, server_id, status, log_output, error_code, error_message)
-VALUES (?, ?, ?, 'queued', '', '', '')`, domain.NewID("slog"), record.ID, serverID); err != nil {
+INSERT INTO deploy_target_logs (id, deploy_record_id, target_type, target_ref_id, target_name, status, log_output, error_code, error_message)
+VALUES (?, ?, 'server', ?, ?, 'queued', '', '', '')`, domain.NewID("tlog"), record.ID, serverID, serverName); err != nil {
 			return domain.ReleaseRequest{}, domain.DeployRecord{}, err
 		}
 	}
@@ -353,10 +363,13 @@ FROM release_events WHERE release_request_id = ? ORDER BY event_seq ASC`, releas
 }
 
 func (s Store) expandTargetServersTx(ctx context.Context, tx *sql.Tx, target domain.DeploymentTarget) ([]string, error) {
-	if target.TargetType == "server" {
-		return []string{target.TargetRefID}, nil
+	if target.SSH == nil {
+		return nil, fmt.Errorf("ssh deployment target config is required")
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT server_id FROM server_group_members WHERE server_group_id = ? ORDER BY server_id`, target.TargetRefID)
+	if target.SSH.TargetType == "server" {
+		return []string{target.SSH.TargetRefID}, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT server_id FROM server_group_members WHERE server_group_id = ? ORDER BY server_id`, target.SSH.TargetRefID)
 	if err != nil {
 		return nil, err
 	}

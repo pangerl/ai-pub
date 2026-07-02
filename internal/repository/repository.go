@@ -502,25 +502,58 @@ func (s Store) CreateDeploymentTarget(ctx context.Context, item domain.Deploymen
 	if item.TimeoutSeconds == 0 {
 		item.TimeoutSeconds = 300
 	}
-	if item.EnvVars == "" {
-		item.EnvVars = "{}"
-	}
 	if item.ArtifactType == "" {
 		item.ArtifactType = "version_only"
+	}
+	if item.SSH == nil && (item.TargetType != "" || item.TargetRefID != "" || item.ScriptPath != "" || item.WorkingDir != "" || item.EnvVars != "") {
+		item.SSH = &domain.SSHDeploymentTarget{
+			TargetType:  item.TargetType,
+			TargetRefID: item.TargetRefID,
+			ScriptPath:  item.ScriptPath,
+			WorkingDir:  item.WorkingDir,
+			EnvVars:     item.EnvVars,
+		}
+	}
+	if item.ExecutorType == "ssh" {
+		if item.SSH == nil {
+			return domain.DeploymentTarget{}, fmt.Errorf("ssh deployment target config is required")
+		}
+		if item.SSH.EnvVars == "" {
+			item.SSH.EnvVars = "{}"
+		}
+		item.SSH.DeploymentTargetID = item.ID
 	}
 	item.Enabled = true
 	item.CreatedAt = now
 	item.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO deployment_targets (id, service_id, environment_id, executor_type, target_type, target_ref_id, artifact_type, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.ServiceID, item.EnvironmentID, item.ExecutorType, item.TargetType, item.TargetRefID, item.ArtifactType, item.ScriptPath, item.WorkingDir, item.EnvVars, item.TimeoutSeconds, boolInt(item.Enabled), formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
-	return item, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO deployment_targets (id, service_id, environment_id, executor_type, artifact_type, timeout_seconds, enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.ServiceID, item.EnvironmentID, item.ExecutorType, item.ArtifactType, item.TimeoutSeconds, boolInt(item.Enabled), formatTime(item.CreatedAt), formatTime(item.UpdatedAt)); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	if item.SSH != nil {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO ssh_deployment_targets (deployment_target_id, target_type, target_ref_id, script_path, working_dir, env_vars)
+VALUES (?, ?, ?, ?, ?, ?)`,
+			item.ID, item.SSH.TargetType, item.SSH.TargetRefID, item.SSH.ScriptPath, item.SSH.WorkingDir, item.SSH.EnvVars); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	return item, nil
 }
 
 func (s Store) ListDeploymentTargets(ctx context.Context, serviceID string, environmentID string) ([]domain.DeploymentTarget, error) {
 	query := `
-SELECT id, service_id, environment_id, executor_type, target_type, target_ref_id, artifact_type, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at
+SELECT id, service_id, environment_id, executor_type, artifact_type, timeout_seconds, enabled, created_at, updated_at
 FROM deployment_targets`
 	var clauses []string
 	var args []any
@@ -549,15 +582,32 @@ FROM deployment_targets`
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if err := s.attachDeploymentTargetConfig(ctx, &items[i]); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 func (s Store) GetDeploymentTarget(ctx context.Context, id string) (domain.DeploymentTarget, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, service_id, environment_id, executor_type, target_type, target_ref_id, artifact_type, script_path, working_dir, env_vars, timeout_seconds, enabled, created_at, updated_at
+SELECT id, service_id, environment_id, executor_type, artifact_type, timeout_seconds, enabled, created_at, updated_at
 FROM deployment_targets WHERE id = ?`, id)
 	item, err := scanDeploymentTarget(row)
-	return item, normalizeNotFound(err)
+	if err != nil {
+		return item, normalizeNotFound(err)
+	}
+	if err := s.attachDeploymentTargetConfig(ctx, &item); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	return item, nil
 }
 
 func (s Store) UpdateDeploymentTarget(ctx context.Context, id string, item domain.DeploymentTarget) (domain.DeploymentTarget, error) {
@@ -566,23 +616,70 @@ func (s Store) UpdateDeploymentTarget(ctx context.Context, id string, item domai
 		return domain.DeploymentTarget{}, err
 	}
 	existing.ExecutorType = choose(item.ExecutorType, existing.ExecutorType)
-	existing.TargetType = choose(item.TargetType, existing.TargetType)
-	existing.TargetRefID = choose(item.TargetRefID, existing.TargetRefID)
 	existing.ArtifactType = choose(item.ArtifactType, existing.ArtifactType)
-	existing.ScriptPath = item.ScriptPath
-	existing.WorkingDir = item.WorkingDir
-	existing.EnvVars = choose(item.EnvVars, existing.EnvVars)
+	if item.SSH == nil && (item.TargetType != "" || item.TargetRefID != "" || item.ScriptPath != "" || item.WorkingDir != "" || item.EnvVars != "") {
+		item.SSH = &domain.SSHDeploymentTarget{
+			TargetType:  item.TargetType,
+			TargetRefID: item.TargetRefID,
+			ScriptPath:  item.ScriptPath,
+			WorkingDir:  item.WorkingDir,
+			EnvVars:     item.EnvVars,
+		}
+	}
+	if item.SSH != nil {
+		if item.SSH.EnvVars == "" {
+			item.SSH.EnvVars = "{}"
+		}
+		item.SSH.DeploymentTargetID = id
+		existing.SSH = item.SSH
+	}
 	if item.TimeoutSeconds != 0 {
 		existing.TimeoutSeconds = item.TimeoutSeconds
 	}
 	existing.Enabled = item.Enabled
 	existing.UpdatedAt = nowUTC()
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
 UPDATE deployment_targets
-SET executor_type = ?, target_type = ?, target_ref_id = ?, artifact_type = ?, script_path = ?, working_dir = ?, env_vars = ?, timeout_seconds = ?, enabled = ?, updated_at = ?
+SET executor_type = ?, artifact_type = ?, timeout_seconds = ?, enabled = ?, updated_at = ?
 WHERE id = ?`,
-		existing.ExecutorType, existing.TargetType, existing.TargetRefID, existing.ArtifactType, existing.ScriptPath, existing.WorkingDir, existing.EnvVars, existing.TimeoutSeconds, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id)
-	return existing, err
+		existing.ExecutorType, existing.ArtifactType, existing.TimeoutSeconds, boolInt(existing.Enabled), formatTime(existing.UpdatedAt), id); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	if existing.SSH != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM ssh_deployment_targets WHERE deployment_target_id = ?`, id); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO ssh_deployment_targets (deployment_target_id, target_type, target_ref_id, script_path, working_dir, env_vars)
+VALUES (?, ?, ?, ?, ?, ?)`,
+			id, existing.SSH.TargetType, existing.SSH.TargetRefID, existing.SSH.ScriptPath, existing.SSH.WorkingDir, existing.SSH.EnvVars); err != nil {
+			return domain.DeploymentTarget{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DeploymentTarget{}, err
+	}
+	return existing, nil
+}
+
+func (s Store) attachDeploymentTargetConfig(ctx context.Context, item *domain.DeploymentTarget) error {
+	row := s.db.QueryRowContext(ctx, `
+SELECT deployment_target_id, target_type, target_ref_id, script_path, working_dir, env_vars
+FROM ssh_deployment_targets WHERE deployment_target_id = ?`, item.ID)
+	var ssh domain.SSHDeploymentTarget
+	if err := row.Scan(&ssh.DeploymentTargetID, &ssh.TargetType, &ssh.TargetRefID, &ssh.ScriptPath, &ssh.WorkingDir, &ssh.EnvVars); err != nil {
+		if item.ExecutorType == "ssh" {
+			return normalizeNotFound(err)
+		}
+		return nil
+	}
+	item.SSH = &ssh
+	return nil
 }
 
 func (s Store) CreateUser(ctx context.Context, item domain.User) (domain.User, error) {
@@ -877,7 +974,7 @@ func scanDeploymentTarget(row rowScanner) (domain.DeploymentTarget, error) {
 	var item domain.DeploymentTarget
 	var enabled int
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.ServiceID, &item.EnvironmentID, &item.ExecutorType, &item.TargetType, &item.TargetRefID, &item.ArtifactType, &item.ScriptPath, &item.WorkingDir, &item.EnvVars, &item.TimeoutSeconds, &enabled, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.ServiceID, &item.EnvironmentID, &item.ExecutorType, &item.ArtifactType, &item.TimeoutSeconds, &enabled, &createdAt, &updatedAt)
 	item.Enabled = enabled == 1
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)

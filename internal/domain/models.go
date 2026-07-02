@@ -28,18 +28,18 @@ type Service struct {
 }
 
 type ServiceVersion struct {
-	ID                          string    `json:"id"`
-	ServiceID                   string    `json:"service_id"`
-	Version                     string    `json:"version"`
-	CommitSHA                   string    `json:"commit_sha"`
-	ArtifactURL                 string    `json:"artifact_url"`
-	Source                      string    `json:"source"`
-	Metadata                    string    `json:"metadata"`
-	CreatedByType               string    `json:"created_by_type"`
-	CreatedByID                 string    `json:"created_by_id"`
-	RegistrationIdempotencyKey  string    `json:"registration_idempotency_key,omitempty"`
-	RegistrationRequestHash     string    `json:"registration_request_hash,omitempty"`
-	CreatedAt                   time.Time `json:"created_at"`
+	ID                         string    `json:"id"`
+	ServiceID                  string    `json:"service_id"`
+	Version                    string    `json:"version"`
+	CommitSHA                  string    `json:"commit_sha"`
+	ArtifactURL                string    `json:"artifact_url"`
+	Source                     string    `json:"source"`
+	Metadata                   string    `json:"metadata"`
+	CreatedByType              string    `json:"created_by_type"`
+	CreatedByID                string    `json:"created_by_id"`
+	RegistrationIdempotencyKey string    `json:"registration_idempotency_key,omitempty"`
+	RegistrationRequestHash    string    `json:"registration_request_hash,omitempty"`
+	CreatedAt                  time.Time `json:"created_at"`
 }
 
 type Environment struct {
@@ -80,20 +80,48 @@ type ServerGroup struct {
 }
 
 type DeploymentTarget struct {
-	ID             string    `json:"id"`
-	ServiceID      string    `json:"service_id"`
-	EnvironmentID  string    `json:"environment_id"`
-	ExecutorType   string    `json:"executor_type"`
-	TargetType     string    `json:"target_type"`
-	TargetRefID    string    `json:"target_ref_id"`
-	ArtifactType   string    `json:"artifact_type"`
-	ScriptPath     string    `json:"script_path"`
-	WorkingDir     string    `json:"working_dir"`
-	EnvVars        string    `json:"env_vars"`
-	TimeoutSeconds int       `json:"timeout_seconds"`
-	Enabled        bool      `json:"enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string               `json:"id"`
+	ServiceID      string               `json:"service_id"`
+	EnvironmentID  string               `json:"environment_id"`
+	ExecutorType   string               `json:"executor_type"`
+	ArtifactType   string               `json:"artifact_type"`
+	TimeoutSeconds int                  `json:"timeout_seconds"`
+	Enabled        bool                 `json:"enabled"`
+	SSH            *SSHDeploymentTarget `json:"ssh,omitempty"`
+	K8s            *K8sDeploymentTarget `json:"k8s,omitempty"`
+	TargetType     string               `json:"-"`
+	TargetRefID    string               `json:"-"`
+	ScriptPath     string               `json:"-"`
+	WorkingDir     string               `json:"-"`
+	EnvVars        string               `json:"-"`
+	CreatedAt      time.Time            `json:"created_at"`
+	UpdatedAt      time.Time            `json:"updated_at"`
+}
+
+type SSHDeploymentTarget struct {
+	DeploymentTargetID string `json:"deployment_target_id"`
+	TargetType         string `json:"target_type"`
+	TargetRefID        string `json:"target_ref_id"`
+	ScriptPath         string `json:"script_path"`
+	WorkingDir         string `json:"working_dir"`
+	EnvVars            string `json:"env_vars"`
+}
+
+type K8sCluster struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	CredentialRef string    `json:"credential_ref"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type K8sDeploymentTarget struct {
+	DeploymentTargetID string `json:"deployment_target_id"`
+	ClusterID          string `json:"cluster_id"`
+	Namespace          string `json:"namespace"`
+	DeploymentName     string `json:"deployment_name"`
+	ContainerName      string `json:"container_name"`
 }
 
 type User struct {
@@ -162,19 +190,22 @@ type DeployRecord struct {
 	Status           string    `json:"status"`
 	ExecutorType     string    `json:"executor_type"`
 	TargetSnapshot   string    `json:"target_snapshot"`
-	TotalServers     int       `json:"total_servers"`
-	SuccessServers   int       `json:"success_servers"`
-	FailedServers    int       `json:"failed_servers"`
-	SkippedServers   int       `json:"skipped_servers"`
+	TotalTargets     int       `json:"total_targets"`
+	SuccessTargets   int       `json:"success_targets"`
+	FailedTargets    int       `json:"failed_targets"`
+	SkippedTargets   int       `json:"skipped_targets"`
 	WorkerID         string    `json:"worker_id"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-type ServerDeployLog struct {
+type DeployTargetLog struct {
 	ID             string    `json:"id"`
 	DeployRecordID string    `json:"deploy_record_id"`
-	ServerID       string    `json:"server_id"`
+	TargetType     string    `json:"target_type"`
+	TargetRefID    string    `json:"target_ref_id"`
+	TargetName     string    `json:"target_name"`
+	ServerID       string    `json:"-"`
 	Status         string    `json:"status"`
 	ExitCode       *int      `json:"exit_code,omitempty"`
 	StartedAt      time.Time `json:"started_at,omitempty"`
@@ -185,14 +216,17 @@ type ServerDeployLog struct {
 	ErrorMessage   string    `json:"error_message"`
 }
 
-type ServerDeploymentState struct {
-	ID               string    `json:"id"`
-	ServiceID        string    `json:"service_id"`
-	EnvironmentID    string    `json:"environment_id"`
-	ServerID         string    `json:"server_id"`
-	ServiceVersionID string    `json:"service_version_id"`
-	DeployRecordID   string    `json:"deploy_record_id"`
-	UpdatedAt        time.Time `json:"updated_at"`
+type DeploymentState struct {
+	ID                 string    `json:"id"`
+	ServiceID          string    `json:"service_id"`
+	EnvironmentID      string    `json:"environment_id"`
+	DeploymentTargetID string    `json:"deployment_target_id"`
+	TargetType         string    `json:"target_type"`
+	TargetRefID        string    `json:"target_ref_id"`
+	ServerID           string    `json:"-"`
+	ServiceVersionID   string    `json:"service_version_id"`
+	DeployRecordID     string    `json:"deploy_record_id"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type ReleaseEvent struct {

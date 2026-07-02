@@ -76,7 +76,8 @@ func mockShouldFail(req Request) bool {
 	if env["MOCK_FAIL_SERVER_ID"] != "" {
 		return env["MOCK_FAIL_SERVER_ID"] == req.Server.ID
 	}
-	return strings.Contains(req.Target.EnvVars, "MOCK_FAIL")
+	ssh := sshTarget(req.Target)
+	return strings.Contains(ssh.EnvVars, "MOCK_FAIL")
 }
 
 type CredentialResolver interface {
@@ -138,7 +139,8 @@ func (s SSH) Check(ctx context.Context, server domain.Server, gateway *domain.Se
 
 func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 	start := time.Now()
-	if req.Target.ScriptPath == "" {
+	ssh := sshTarget(req.Target)
+	if ssh.ScriptPath == "" {
 		return failedResult(start, "script_not_found", "script_path is required", nil)
 	}
 	secret, err := s.Credentials.Secret(ctx, req.Server.CredentialRef)
@@ -159,10 +161,10 @@ func (s SSH) Execute(ctx context.Context, req Request) repository.ServerResult {
 		return failedResult(start, "auth_failed", sanitize(err.Error(), secret.Secret), nil)
 	}
 	defer proxyCleanup()
-	command := req.Target.ScriptPath
+	command := ssh.ScriptPath
 	command = remoteEnvPrefix(req) + command
-	if req.Target.WorkingDir != "" {
-		command = "cd " + shellQuote(req.Target.WorkingDir) + " && " + command
+	if ssh.WorkingDir != "" {
+		command = "cd " + shellQuote(ssh.WorkingDir) + " && " + command
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -371,7 +373,7 @@ func failedResult(start time.Time, code string, message string, exitCode *int) r
 }
 
 func executionEnv(req Request) map[string]string {
-	env := targetEnv(req.Target.EnvVars)
+	env := targetEnv(sshTarget(req.Target).EnvVars)
 	env["AI_PUB_RELEASE_ID"] = req.Release.ID
 	env["AI_PUB_DEPLOY_ID"] = req.Record.ID
 	env["AI_PUB_SERVER_ID"] = req.Server.ID
@@ -382,6 +384,19 @@ func executionEnv(req Request) map[string]string {
 	env["AI_PUB_COMMIT_SHA"] = req.Version.CommitSHA
 	env["AI_PUB_ARTIFACT_URL"] = req.Version.ArtifactURL
 	return env
+}
+
+func sshTarget(target domain.DeploymentTarget) domain.SSHDeploymentTarget {
+	if target.SSH == nil {
+		return domain.SSHDeploymentTarget{
+			TargetType:  target.TargetType,
+			TargetRefID: target.TargetRefID,
+			ScriptPath:  target.ScriptPath,
+			WorkingDir:  target.WorkingDir,
+			EnvVars:     target.EnvVars,
+		}
+	}
+	return *target.SSH
 }
 
 func targetEnv(raw string) map[string]string {

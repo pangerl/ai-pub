@@ -43,12 +43,12 @@ func getDeployRecord(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func listServerDeployLogs(store repository.Store) http.HandlerFunc {
+func listDeployTargetLogs(store repository.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
 			return
 		}
-		items, err := store.ListServerDeployLogs(r.Context(), r.PathValue("id"))
+		items, err := store.ListDeployTargetLogs(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 			return
@@ -57,12 +57,12 @@ func listServerDeployLogs(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func listServerDeploymentStates(store repository.Store) http.HandlerFunc {
+func listDeploymentStates(store repository.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := authorizeOptionalAPIKey(w, r, store, "deploy:read"); !ok {
 			return
 		}
-		items, err := store.ListServerDeploymentStates(r.Context())
+		items, err := store.ListDeploymentStates(r.Context())
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 			return

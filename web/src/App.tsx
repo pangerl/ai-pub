@@ -546,7 +546,7 @@ export function App() {
         apiGet<Entity[]>('/api/v1/users'),
         apiGet<Entity[]>('/api/v1/api-keys'),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/credentials') : Promise.resolve([]),
-        apiGet<Entity[]>('/api/v1/server-deployment-states'),
+        apiGet<Entity[]>('/api/v1/deployment-states'),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/notification-configs') : Promise.resolve([]),
         currentUser?.role === 'admin' ? apiGet<Entity[]>('/api/v1/notification-deliveries') : Promise.resolve([]),
         apiGet<Entity>('/api/v1/ops/summary'),
@@ -562,7 +562,7 @@ export function App() {
       ]);
       const events = releaseID ? await apiGet<Entity[]>(`/api/v1/release-requests/${releaseID}/events`) : [];
       const currentDeployID = activeDeployID || undefined;
-      const serverLogs = currentDeployID ? await apiGet<Entity[]>(`/api/v1/deploy-records/${currentDeployID}/server-logs`) : [];
+      const serverLogs = currentDeployID ? await apiGet<Entity[]>(`/api/v1/deploy-records/${currentDeployID}/target-logs`) : [];
       setHealth(healthBody);
       if (releaseID) {
         setActiveRelease(refreshedActiveRelease);
@@ -1009,7 +1009,7 @@ export function App() {
   }
 
   async function refreshServerLogs(deployID: string) {
-    const serverLogs = await apiGet<Entity[]>(`/api/v1/deploy-records/${deployID}/server-logs`);
+    const serverLogs = await apiGet<Entity[]>(`/api/v1/deploy-records/${deployID}/target-logs`);
     setState((current) => ({ ...current, serverLogs }));
   }
 
@@ -1239,9 +1239,9 @@ export function App() {
                 ) : null}
               </section>
               {activeDeploy ? <section className="surface deploy-detail"><SectionTitle title="执行快照" meta={`DEPLOY ${shortID(activeDeploy.id)}`} /><KeyValueGrid values={[
-                ['状态', activeDeploy.status], ['执行器', activeDeploy.executor_type], ['创建时间', formatDateTime(activeDeploy.created_at)], ['更新时间', formatDateTime(activeDeploy.updated_at)], ['目标服务器数', activeDeploy.total_servers], ['成功 / 失败 / 跳过', `${activeDeploy.success_servers ?? 0} / ${activeDeploy.failed_servers ?? 0} / ${activeDeploy.skipped_servers ?? 0}`],
+                ['状态', activeDeploy.status], ['执行器', activeDeploy.executor_type], ['创建时间', formatDateTime(activeDeploy.created_at)], ['更新时间', formatDateTime(activeDeploy.updated_at)], ['执行目标数', activeDeploy.total_targets], ['成功 / 失败 / 跳过', `${activeDeploy.success_targets ?? 0} / ${activeDeploy.failed_targets ?? 0} / ${activeDeploy.skipped_targets ?? 0}`],
               ]} /><JsonPreview value={activeDeploy.target_snapshot} /></section> : null}
-              <section className="surface logs-surface"><SectionTitle title="服务器日志" meta={activeDeployID ? `DEPLOY ${shortID(activeDeployID)}` : 'SELECT A DEPLOY RECORD'} /><ServerLogRows data={state.serverLogs} state={state} /></section>
+              <section className="surface logs-surface"><SectionTitle title="执行目标日志" meta={activeDeployID ? `DEPLOY ${shortID(activeDeployID)}` : 'SELECT A DEPLOY RECORD'} /><ServerLogRows data={state.serverLogs} state={state} /></section>
             </>
           ) : null}
 
@@ -1487,7 +1487,7 @@ function ReleaseRows({ data, state, onOpen }: { data: Entity[]; state: AppState;
 
 function DeployRows({ data, state, onOpen }: { data: Entity[]; state: AppState; onOpen: (item: Entity) => void }) {
   if (data.length === 0) return <div className="inline-empty">暂无发布记录。</div>;
-  return <div className="deploy-list">{data.map((item) => <button className="deploy-row" key={String(item.id)} onClick={() => onOpen(item)}><span><strong>{shortID(item.id)}</strong><small>{formatDeployContext(item, state)}</small></span><span className="server-counts">成功 {item.success_servers ?? 0} / 失败 {item.failed_servers ?? 0} / 跳过 {item.skipped_servers ?? 0}</span><StatusTag value={String(item.status)} /><span aria-hidden="true">→</span></button>)}</div>;
+  return <div className="deploy-list">{data.map((item) => <button className="deploy-row" key={String(item.id)} onClick={() => onOpen(item)}><span><strong>{shortID(item.id)}</strong><small>{formatDeployContext(item, state)}</small></span><span className="server-counts">成功 {item.success_targets ?? 0} / 失败 {item.failed_targets ?? 0} / 跳过 {item.skipped_targets ?? 0}</span><StatusTag value={String(item.status)} /><span aria-hidden="true">→</span></button>)}</div>;
 }
 
 function EventRows({ data, state }: { data: Entity[]; state: AppState }) {
@@ -1496,7 +1496,7 @@ function EventRows({ data, state }: { data: Entity[]; state: AppState }) {
 }
 
 function ServerLogRows({ data, state }: { data: Entity[]; state: AppState }) {
-  if (data.length === 0) return <div className="inline-empty">选择一条发布记录查看服务器日志。</div>;
+  if (data.length === 0) return <div className="inline-empty">选择一条发布记录查看执行目标日志。</div>;
   return <div className="server-log-list">{data.map((item) => {
     const status = String(item.status ?? '');
     // queued/running 阶段尚无输出属正常，避免误判为故障。
@@ -1727,7 +1727,7 @@ function ServiceDetail({ service, versions, targets, environments, states }: { s
   const environmentIDs = new Set(serviceTargets.map((item) => String(item.environment_id)));
   const availableEnvironments = environments.filter((item) => environmentIDs.has(String(item.id)));
   const serviceStates = states.filter((item) => String(item.service_id) === String(service.id));
-  return <div className="service-detail-grid"><div><span className="mono-label">服务</span><h3>{service.name}</h3><p>{service.description || '暂无描述'}</p><KeyValueGrid values={[["可用环境", availableEnvironments.length], ["部署目标", serviceTargets.length], ["历史版本", versions.length], ["服务器当前版本", serviceStates.length]]} /></div><div><span className="mono-label">可用环境</span><div className="detail-chip-list">{availableEnvironments.length ? availableEnvironments.map((item) => <span className={item.is_production ? 'detail-chip production' : 'detail-chip'} key={String(item.id)}>{item.name}{item.is_production ? ' · 生产' : ''}</span>) : <span className="detail-muted">尚未配置部署目标</span>}</div><span className="mono-label">部署目标</span><div className="detail-list">{serviceTargets.map((item) => <div key={String(item.id)}><strong>{item.executor_type} / {item.target_type}</strong><small>{`${environments.find((environment) => String(environment.id) === String(item.environment_id))?.name ?? item.environment_id} · ${item.enabled === false ? '已停用' : '已启用'}`}</small></div>)}</div></div><div><span className="mono-label">最近版本</span><div className="detail-list">{versions.length ? versions.slice(0, 6).map((item) => { const runURL = versionRunURL(item.metadata); return <div key={String(item.id)}><strong>{item.version}</strong><Tag color={item.source === 'ci' ? 'blue' : 'default'}>{item.source === 'ci' ? 'CI' : '手动'}</Tag><small>{`${item.commit_sha ? String(item.commit_sha).slice(0, 8) : '无 commit'} · ${maskArtifactURL(item.artifact_url)}`}</small>{runURL ? <a className="detail-link" href={runURL} target="_blank" rel="noreferrer">外部运行</a> : null}</div>; }) : <span className="detail-muted">暂无版本</span>}</div></div></div>;
+  return <div className="service-detail-grid"><div><span className="mono-label">服务</span><h3>{service.name}</h3><p>{service.description || '暂无描述'}</p><KeyValueGrid values={[["可用环境", availableEnvironments.length], ["部署目标", serviceTargets.length], ["历史版本", versions.length], ["当前部署版本", serviceStates.length]]} /></div><div><span className="mono-label">可用环境</span><div className="detail-chip-list">{availableEnvironments.length ? availableEnvironments.map((item) => <span className={item.is_production ? 'detail-chip production' : 'detail-chip'} key={String(item.id)}>{item.name}{item.is_production ? ' · 生产' : ''}</span>) : <span className="detail-muted">尚未配置部署目标</span>}</div><span className="mono-label">部署目标</span><div className="detail-list">{serviceTargets.map((item) => <div key={String(item.id)}><strong>{item.executor_type} / {item.target_type}</strong><small>{`${environments.find((environment) => String(environment.id) === String(item.environment_id))?.name ?? item.environment_id} · ${item.enabled === false ? '已停用' : '已启用'}`}</small></div>)}</div></div><div><span className="mono-label">最近版本</span><div className="detail-list">{versions.length ? versions.slice(0, 6).map((item) => { const runURL = versionRunURL(item.metadata); return <div key={String(item.id)}><strong>{item.version}</strong><Tag color={item.source === 'ci' ? 'blue' : 'default'}>{item.source === 'ci' ? 'CI' : '手动'}</Tag><small>{`${item.commit_sha ? String(item.commit_sha).slice(0, 8) : '无 commit'} · ${maskArtifactURL(item.artifact_url)}`}</small>{runURL ? <a className="detail-link" href={runURL} target="_blank" rel="noreferrer">外部运行</a> : null}</div>; }) : <span className="detail-muted">暂无版本</span>}</div></div></div>;
 }
 
 function maskArtifactURL(value: Entity[string]) {

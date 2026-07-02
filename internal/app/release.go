@@ -139,7 +139,11 @@ func (s ReleaseService) Preflight(ctx context.Context, input PreflightInput) (Pr
 	if target.ServiceID != input.ServiceID || target.EnvironmentID != input.EnvironmentID {
 		result.block("target_mismatch", "部署目标与服务或环境不匹配")
 	}
-	if conflicts := reservedEnvConflicts(target.EnvVars); len(conflicts) > 0 {
+	sshEnvVars := ""
+	if target.SSH != nil {
+		sshEnvVars = target.SSH.EnvVars
+	}
+	if conflicts := reservedEnvConflicts(sshEnvVars); len(conflicts) > 0 {
 		result.block("reserved_env_var", "部署目标环境变量不能覆盖系统变量: "+strings.Join(conflicts, ", "))
 	}
 	// 制品约束由部署目标的 artifact_type 决定：oci_image 强制要求 digest 引用；

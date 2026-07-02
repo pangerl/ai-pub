@@ -74,16 +74,16 @@ func (s Store) ClaimNextDeploy(ctx context.Context, workerID string) (ClaimedDep
 	defer tx.Rollback()
 
 	row := tx.QueryRowContext(ctx, `
-SELECT dr.id, dr.release_request_id, dr.status, dr.executor_type, dr.target_snapshot, dr.total_servers, dr.success_servers,
-dr.failed_servers, dr.skipped_servers, dr.worker_id, dr.created_at, dr.updated_at
+SELECT dr.id, dr.release_request_id, dr.status, dr.executor_type, dr.target_snapshot, dr.total_targets, dr.success_targets,
+dr.failed_targets, dr.skipped_targets, dr.worker_id, dr.created_at, dr.updated_at
 FROM deploy_records dr
 JOIN release_requests rr ON rr.id = dr.release_request_id
 JOIN environments env ON env.id = rr.environment_id
 WHERE dr.status = 'queued' AND rr.status = 'queued'
 AND NOT EXISTS (
   SELECT 1
-  FROM server_deploy_logs candidate
-  JOIN server_deploy_logs running ON running.server_id = candidate.server_id
+  FROM deploy_target_logs candidate
+  JOIN deploy_target_logs running ON running.target_type = candidate.target_type AND running.target_ref_id = candidate.target_ref_id
   JOIN deploy_records running_record ON running_record.id = running.deploy_record_id
   WHERE candidate.deploy_record_id = dr.id
     AND running_record.status = 'running'
@@ -212,7 +212,7 @@ WHERE id = ? AND status = 'running' AND lease_expires_at < ?`,
 		}
 		recovered = append(recovered, item)
 		if _, err := tx.ExecContext(ctx, `
-UPDATE server_deploy_logs
+UPDATE deploy_target_logs
 SET status = 'failed', finished_at = ?, error_code = 'worker_lease_expired', error_message = ?
 WHERE deploy_record_id = ? AND status IN ('queued', 'running')`,
 			formatTime(now), "worker lease expired", item.RecordID); err != nil {
@@ -224,12 +224,12 @@ SELECT
   COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0)
-FROM server_deploy_logs WHERE deploy_record_id = ?`, item.RecordID).Scan(&success, &failed, &skipped); err != nil {
+FROM deploy_target_logs WHERE deploy_record_id = ?`, item.RecordID).Scan(&success, &failed, &skipped); err != nil {
 			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `
 UPDATE deploy_records
-SET success_servers = ?, failed_servers = ?, skipped_servers = ?
+SET success_targets = ?, failed_targets = ?, skipped_targets = ?
 WHERE id = ?`, success, failed, skipped, item.RecordID); err != nil {
 			return nil, err
 		}
@@ -268,8 +268,8 @@ func (s Store) resolveDeploySnapshot(ctx context.Context, record domain.DeployRe
 func (s Store) ListDeployServers(ctx context.Context, deployRecordID string) ([]domain.Server, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT s.id, s.name, s.host, s.port, s.username, s.auth_type, s.credential_ref, s.role, s.gateway_id, s.enabled, s.last_check_status, s.last_check_at, s.created_at, s.updated_at
-FROM server_deploy_logs l
-JOIN servers s ON s.id = l.server_id
+FROM deploy_target_logs l
+JOIN servers s ON s.id = l.target_ref_id
 WHERE l.deploy_record_id = ?
 ORDER BY l.id ASC`, deployRecordID)
 	if err != nil {
@@ -287,23 +287,23 @@ ORDER BY l.id ASC`, deployRecordID)
 	return items, rows.Err()
 }
 
-func (s Store) MarkServerFinished(ctx context.Context, deployRecordID string, serverID string, result ServerResult) error {
+func (s Store) MarkTargetFinished(ctx context.Context, deployRecordID string, targetRefID string, result ServerResult) error {
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-UPDATE server_deploy_logs
+UPDATE deploy_target_logs
 SET status = ?, exit_code = ?, finished_at = ?, duration_ms = ?, log_output = ?, error_code = ?, error_message = ?
-WHERE deploy_record_id = ? AND server_id = ?`,
-		result.Status, nullableInt(result.ExitCode), formatTime(now), result.DurationMS, result.LogOutput, result.ErrorCode, result.ErrorMessage, deployRecordID, serverID)
+WHERE deploy_record_id = ? AND target_ref_id = ?`,
+		result.Status, nullableInt(result.ExitCode), formatTime(now), result.DurationMS, result.LogOutput, result.ErrorCode, result.ErrorMessage, deployRecordID, targetRefID)
 	return err
 }
 
-func (s Store) MarkServerRunning(ctx context.Context, deployRecordID string, serverID string) error {
+func (s Store) MarkTargetRunning(ctx context.Context, deployRecordID string, targetRefID string) error {
 	now := nowUTC()
 	res, err := s.db.ExecContext(ctx, `
-UPDATE server_deploy_logs
+UPDATE deploy_target_logs
 SET status = 'running', started_at = ?
-WHERE deploy_record_id = ? AND server_id = ? AND status = 'queued'`,
-		formatTime(now), deployRecordID, serverID)
+WHERE deploy_record_id = ? AND target_ref_id = ? AND status = 'queued'`,
+		formatTime(now), deployRecordID, targetRefID)
 	if err != nil {
 		return err
 	}
@@ -317,10 +317,10 @@ WHERE deploy_record_id = ? AND server_id = ? AND status = 'queued'`,
 	return nil
 }
 
-func (s Store) MarkQueuedServersSkipped(ctx context.Context, deployRecordID string, message string) error {
+func (s Store) MarkQueuedTargetsSkipped(ctx context.Context, deployRecordID string, message string) error {
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-UPDATE server_deploy_logs
+UPDATE deploy_target_logs
 SET status = 'skipped', finished_at = ?, error_code = 'skipped_after_failure', error_message = ?
 WHERE deploy_record_id = ? AND status IN ('queued', 'running')`,
 		formatTime(now), message, deployRecordID)
@@ -338,13 +338,13 @@ func (s Store) FinishDeploy(ctx context.Context, deployRecordID string) (domain.
 	if err := tx.QueryRowContext(ctx, `SELECT release_request_id FROM deploy_records WHERE id = ?`, deployRecordID).Scan(&releaseID); err != nil {
 		return domain.DeployRecord{}, err
 	}
-	var serviceID, environmentID, versionID string
+	var serviceID, environmentID, versionID, deploymentTargetID string
 	if err := tx.QueryRowContext(ctx, `
-SELECT service_id, environment_id, service_version_id FROM release_requests WHERE id = ?`, releaseID).Scan(&serviceID, &environmentID, &versionID); err != nil {
+SELECT service_id, environment_id, service_version_id, deployment_target_id FROM release_requests WHERE id = ?`, releaseID).Scan(&serviceID, &environmentID, &versionID, &deploymentTargetID); err != nil {
 		return domain.DeployRecord{}, err
 	}
 	counts := map[string]int{"success": 0, "failed": 0, "skipped": 0}
-	rows, err := tx.QueryContext(ctx, `SELECT status, COUNT(*) FROM server_deploy_logs WHERE deploy_record_id = ? GROUP BY status`, deployRecordID)
+	rows, err := tx.QueryContext(ctx, `SELECT status, COUNT(*) FROM deploy_target_logs WHERE deploy_record_id = ? GROUP BY status`, deployRecordID)
 	if err != nil {
 		return domain.DeployRecord{}, err
 	}
@@ -372,7 +372,7 @@ SELECT service_id, environment_id, service_version_id FROM release_requests WHER
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE deploy_records
-SET status = ?, success_servers = ?, failed_servers = ?, skipped_servers = ?, lease_expires_at = NULL, finished_at = ?, error_summary = ?, updated_at = ?
+SET status = ?, success_targets = ?, failed_targets = ?, skipped_targets = ?, lease_expires_at = NULL, finished_at = ?, error_summary = ?, updated_at = ?
 WHERE id = ?`,
 		status, counts["success"], counts["failed"], counts["skipped"], formatTime(now), errorSummary, formatTime(now), deployRecordID); err != nil {
 		return domain.DeployRecord{}, err
@@ -386,32 +386,40 @@ WHERE id = ?`,
 	}
 	if counts["success"] > 0 {
 		successRows, err := tx.QueryContext(ctx, `
-SELECT server_id FROM server_deploy_logs WHERE deploy_record_id = ? AND status = 'success'`, deployRecordID)
+SELECT target_type, target_ref_id FROM deploy_target_logs WHERE deploy_record_id = ? AND status = 'success'`, deployRecordID)
 		if err != nil {
 			return domain.DeployRecord{}, err
 		}
-		serverIDs := make([]string, 0, counts["success"])
+		targets := make([]struct {
+			targetType  string
+			targetRefID string
+		}, 0, counts["success"])
 		for successRows.Next() {
-			var serverID string
-			if err := successRows.Scan(&serverID); err != nil {
+			var target struct {
+				targetType  string
+				targetRefID string
+			}
+			if err := successRows.Scan(&target.targetType, &target.targetRefID); err != nil {
 				successRows.Close()
 				return domain.DeployRecord{}, err
 			}
-			serverIDs = append(serverIDs, serverID)
+			targets = append(targets, target)
 		}
 		if err := successRows.Close(); err != nil {
 			return domain.DeployRecord{}, err
 		}
-		for _, serverID := range serverIDs {
+		for _, target := range targets {
 			if _, err := tx.ExecContext(ctx, `
-DELETE FROM server_deployment_states WHERE service_id = ? AND environment_id = ? AND server_id = ?`,
-				serviceID, environmentID, serverID); err != nil {
+DELETE FROM deployment_states
+WHERE service_id = ? AND environment_id = ? AND deployment_target_id = ? AND target_type = ? AND target_ref_id = ?`,
+				serviceID, environmentID, deploymentTargetID, target.targetType, target.targetRefID); err != nil {
 				return domain.DeployRecord{}, err
 			}
 			if _, err := tx.ExecContext(ctx, `
-INSERT INTO server_deployment_states (id, service_id, environment_id, server_id, service_version_id, deploy_record_id, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				domain.NewID("state"), serviceID, environmentID, serverID, versionID, deployRecordID, formatTime(now)); err != nil {
+INSERT INTO deployment_states (
+id, service_id, environment_id, deployment_target_id, target_type, target_ref_id, service_version_id, deploy_record_id, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				domain.NewID("state"), serviceID, environmentID, deploymentTargetID, target.targetType, target.targetRefID, versionID, deployRecordID, formatTime(now)); err != nil {
 				return domain.DeployRecord{}, err
 			}
 		}
@@ -424,8 +432,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 
 func (s Store) GetDeployRecord(ctx context.Context, id string) (domain.DeployRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, release_request_id, status, executor_type, target_snapshot, total_servers, success_servers, failed_servers,
-skipped_servers, worker_id, created_at, updated_at
+SELECT id, release_request_id, status, executor_type, target_snapshot, total_targets, success_targets, failed_targets,
+skipped_targets, worker_id, created_at, updated_at
 FROM deploy_records WHERE id = ?`, id)
 	item, err := scanDeployRecord(row)
 	return item, normalizeNotFound(err)
@@ -471,8 +479,8 @@ func (s Store) ListDeployRecords(ctx context.Context, filter DeployListFilter) (
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT dr.id, dr.release_request_id, dr.status, dr.executor_type, dr.target_snapshot, dr.total_servers, dr.success_servers,
-dr.failed_servers, dr.skipped_servers, dr.worker_id, dr.created_at, dr.updated_at,
+SELECT dr.id, dr.release_request_id, dr.status, dr.executor_type, dr.target_snapshot, dr.total_targets, dr.success_targets,
+dr.failed_targets, dr.skipped_targets, dr.worker_id, dr.created_at, dr.updated_at,
 rr.service_id AS release_service_id, rr.environment_id AS release_environment_id, rr.service_version_id AS release_service_version_id
 FROM deploy_records dr LEFT JOIN release_requests rr ON rr.id = dr.release_request_id`+where+`
 ORDER BY dr.created_at DESC, dr.id DESC
@@ -502,17 +510,17 @@ LIMIT ? OFFSET ?`,
 	return PagedDeploys{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
 }
 
-func (s Store) ListServerDeployLogs(ctx context.Context, deployRecordID string) ([]domain.ServerDeployLog, error) {
+func (s Store) ListDeployTargetLogs(ctx context.Context, deployRecordID string) ([]domain.DeployTargetLog, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, deploy_record_id, server_id, status, exit_code, started_at, finished_at, duration_ms, log_output, error_code, error_message
-FROM server_deploy_logs WHERE deploy_record_id = ? ORDER BY id ASC`, deployRecordID)
+SELECT id, deploy_record_id, target_type, target_ref_id, target_name, status, exit_code, started_at, finished_at, duration_ms, log_output, error_code, error_message
+FROM deploy_target_logs WHERE deploy_record_id = ? ORDER BY id ASC`, deployRecordID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []domain.ServerDeployLog{}
+	items := []domain.DeployTargetLog{}
 	for rows.Next() {
-		item, err := scanServerDeployLog(rows)
+		item, err := scanDeployTargetLog(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -521,20 +529,23 @@ FROM server_deploy_logs WHERE deploy_record_id = ? ORDER BY id ASC`, deployRecor
 	return items, rows.Err()
 }
 
-func (s Store) ListServerDeploymentStates(ctx context.Context) ([]domain.ServerDeploymentState, error) {
+func (s Store) ListDeploymentStates(ctx context.Context) ([]domain.DeploymentState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, service_id, environment_id, server_id, service_version_id, deploy_record_id, updated_at
-FROM server_deployment_states ORDER BY updated_at DESC, id DESC`)
+SELECT id, service_id, environment_id, deployment_target_id, target_type, target_ref_id, service_version_id, deploy_record_id, updated_at
+FROM deployment_states ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []domain.ServerDeploymentState{}
+	items := []domain.DeploymentState{}
 	for rows.Next() {
-		var item domain.ServerDeploymentState
+		var item domain.DeploymentState
 		var updatedAt string
-		if err := rows.Scan(&item.ID, &item.ServiceID, &item.EnvironmentID, &item.ServerID, &item.ServiceVersionID, &item.DeployRecordID, &updatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.ServiceID, &item.EnvironmentID, &item.DeploymentTargetID, &item.TargetType, &item.TargetRefID, &item.ServiceVersionID, &item.DeployRecordID, &updatedAt); err != nil {
 			return nil, err
+		}
+		if item.TargetType == "server" || item.TargetType == "server_group_member" {
+			item.ServerID = item.TargetRefID
 		}
 		item.UpdatedAt = parseTime(updatedAt)
 		items = append(items, item)
@@ -590,7 +601,7 @@ func (s Store) OpsSummary(ctx context.Context) (OpsSummary, error) {
 		{&out.FailedNotifications, `SELECT COUNT(*) FROM notification_deliveries WHERE status = 'failed'`},
 		{&out.EnabledNotifications, `SELECT COUNT(*) FROM notification_configs WHERE enabled = 1`},
 		{&out.TotalReleaseRequests, `SELECT COUNT(*) FROM release_requests`},
-		{&out.TotalDeploymentStates, `SELECT COUNT(*) FROM server_deployment_states`},
+		{&out.TotalDeploymentStates, `SELECT COUNT(*) FROM deployment_states`},
 	}
 	for _, query := range queries {
 		if err := s.db.QueryRowContext(ctx, query.sql).Scan(query.target); err != nil {
@@ -603,8 +614,8 @@ func (s Store) OpsSummary(ctx context.Context) (OpsSummary, error) {
 func scanDeployRecord(row rowScanner) (domain.DeployRecord, error) {
 	var item domain.DeployRecord
 	var createdAt, updatedAt string
-	err := row.Scan(&item.ID, &item.ReleaseRequestID, &item.Status, &item.ExecutorType, &item.TargetSnapshot, &item.TotalServers,
-		&item.SuccessServers, &item.FailedServers, &item.SkippedServers, &item.WorkerID, &createdAt, &updatedAt)
+	err := row.Scan(&item.ID, &item.ReleaseRequestID, &item.Status, &item.ExecutorType, &item.TargetSnapshot, &item.TotalTargets,
+		&item.SuccessTargets, &item.FailedTargets, &item.SkippedTargets, &item.WorkerID, &createdAt, &updatedAt)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, err
@@ -615,8 +626,8 @@ func scanDeployRecordListItem(row rowScanner) (DeployRecordListItem, error) {
 	var item DeployRecordListItem
 	var createdAt, updatedAt string
 	var serviceID, environmentID, serviceVersionID sql.NullString
-	err := row.Scan(&item.ID, &item.ReleaseRequestID, &item.Status, &item.ExecutorType, &item.TargetSnapshot, &item.TotalServers,
-		&item.SuccessServers, &item.FailedServers, &item.SkippedServers, &item.WorkerID, &createdAt, &updatedAt,
+	err := row.Scan(&item.ID, &item.ReleaseRequestID, &item.Status, &item.ExecutorType, &item.TargetSnapshot, &item.TotalTargets,
+		&item.SuccessTargets, &item.FailedTargets, &item.SkippedTargets, &item.WorkerID, &createdAt, &updatedAt,
 		&serviceID, &environmentID, &serviceVersionID)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
@@ -626,11 +637,11 @@ func scanDeployRecordListItem(row rowScanner) (DeployRecordListItem, error) {
 	return item, err
 }
 
-func scanServerDeployLog(row rowScanner) (domain.ServerDeployLog, error) {
-	var item domain.ServerDeployLog
+func scanDeployTargetLog(row rowScanner) (domain.DeployTargetLog, error) {
+	var item domain.DeployTargetLog
 	var exitCode sql.NullInt64
 	var startedAt, finishedAt sql.NullString
-	err := row.Scan(&item.ID, &item.DeployRecordID, &item.ServerID, &item.Status, &exitCode, &startedAt, &finishedAt,
+	err := row.Scan(&item.ID, &item.DeployRecordID, &item.TargetType, &item.TargetRefID, &item.TargetName, &item.Status, &exitCode, &startedAt, &finishedAt,
 		&item.DurationMS, &item.LogOutput, &item.ErrorCode, &item.ErrorMessage)
 	if exitCode.Valid {
 		value := int(exitCode.Int64)
@@ -641,6 +652,9 @@ func scanServerDeployLog(row rowScanner) (domain.ServerDeployLog, error) {
 	}
 	if finishedAt.Valid {
 		item.FinishedAt = parseTime(finishedAt.String)
+	}
+	if item.TargetType == "server" || item.TargetType == "server_group_member" {
+		item.ServerID = item.TargetRefID
 	}
 	return item, err
 }

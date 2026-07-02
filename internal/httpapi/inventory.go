@@ -467,17 +467,41 @@ func listDeploymentTargets(store repository.Store) http.HandlerFunc {
 
 func createDeploymentTarget(store repository.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var input domain.DeploymentTarget
+		var input deploymentTargetPayload
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		item, err := store.CreateDeploymentTarget(r.Context(), input)
+		target := input.toDomain()
+		item, err := store.CreateDeploymentTarget(r.Context(), target)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
 			return
 		}
 		writeData(w, r, http.StatusCreated, item)
 	}
+}
+
+type deploymentTargetPayload struct {
+	domain.DeploymentTarget
+	TargetType  string `json:"target_type"`
+	TargetRefID string `json:"target_ref_id"`
+	ScriptPath  string `json:"script_path"`
+	WorkingDir  string `json:"working_dir"`
+	EnvVars     string `json:"env_vars"`
+}
+
+func (p deploymentTargetPayload) toDomain() domain.DeploymentTarget {
+	item := p.DeploymentTarget
+	if item.SSH == nil && (p.TargetType != "" || p.TargetRefID != "" || p.ScriptPath != "" || p.WorkingDir != "" || p.EnvVars != "") {
+		item.SSH = &domain.SSHDeploymentTarget{
+			TargetType:  p.TargetType,
+			TargetRefID: p.TargetRefID,
+			ScriptPath:  p.ScriptPath,
+			WorkingDir:  p.WorkingDir,
+			EnvVars:     p.EnvVars,
+		}
+	}
+	return item
 }
 
 func patchDeploymentTarget(store repository.Store) http.HandlerFunc {
@@ -488,14 +512,17 @@ func patchDeploymentTarget(store repository.Store) http.HandlerFunc {
 			return
 		}
 		var patch struct {
-			ExecutorType   *string `json:"executor_type"`
-			TargetType     *string `json:"target_type"`
-			TargetRefID    *string `json:"target_ref_id"`
-			ScriptPath     *string `json:"script_path"`
-			WorkingDir     *string `json:"working_dir"`
-			EnvVars        *string `json:"env_vars"`
-			TimeoutSeconds *int    `json:"timeout_seconds"`
-			Enabled        *bool   `json:"enabled"`
+			ExecutorType   *string                     `json:"executor_type"`
+			ArtifactType   *string                     `json:"artifact_type"`
+			SSH            *domain.SSHDeploymentTarget `json:"ssh"`
+			K8s            *domain.K8sDeploymentTarget `json:"k8s"`
+			TargetType     *string                     `json:"target_type"`
+			TargetRefID    *string                     `json:"target_ref_id"`
+			ScriptPath     *string                     `json:"script_path"`
+			WorkingDir     *string                     `json:"working_dir"`
+			EnvVars        *string                     `json:"env_vars"`
+			TimeoutSeconds *int                        `json:"timeout_seconds"`
+			Enabled        *bool                       `json:"enabled"`
 		}
 		if !decodeJSON(w, r, &patch) {
 			return
@@ -503,20 +530,36 @@ func patchDeploymentTarget(store repository.Store) http.HandlerFunc {
 		if patch.ExecutorType != nil {
 			existing.ExecutorType = *patch.ExecutorType
 		}
-		if patch.TargetType != nil {
-			existing.TargetType = *patch.TargetType
+		if patch.ArtifactType != nil {
+			existing.ArtifactType = *patch.ArtifactType
 		}
-		if patch.TargetRefID != nil {
-			existing.TargetRefID = *patch.TargetRefID
+		if patch.SSH != nil {
+			existing.SSH = patch.SSH
 		}
-		if patch.ScriptPath != nil {
-			existing.ScriptPath = *patch.ScriptPath
+		if patch.TargetType != nil || patch.TargetRefID != nil || patch.ScriptPath != nil || patch.WorkingDir != nil || patch.EnvVars != nil {
+			ssh := domain.SSHDeploymentTarget{}
+			if existing.SSH != nil {
+				ssh = *existing.SSH
+			}
+			if patch.TargetType != nil {
+				ssh.TargetType = *patch.TargetType
+			}
+			if patch.TargetRefID != nil {
+				ssh.TargetRefID = *patch.TargetRefID
+			}
+			if patch.ScriptPath != nil {
+				ssh.ScriptPath = *patch.ScriptPath
+			}
+			if patch.WorkingDir != nil {
+				ssh.WorkingDir = *patch.WorkingDir
+			}
+			if patch.EnvVars != nil {
+				ssh.EnvVars = *patch.EnvVars
+			}
+			existing.SSH = &ssh
 		}
-		if patch.WorkingDir != nil {
-			existing.WorkingDir = *patch.WorkingDir
-		}
-		if patch.EnvVars != nil {
-			existing.EnvVars = *patch.EnvVars
+		if patch.K8s != nil {
+			existing.K8s = patch.K8s
 		}
 		if patch.TimeoutSeconds != nil {
 			existing.TimeoutSeconds = *patch.TimeoutSeconds

@@ -91,7 +91,7 @@ func TestSQLiteClaimedServerGroupKeepsUnstartedServersQueued(t *testing.T) {
 	if claimed.Release.ID != queued.ID || len(claimed.Servers) != 2 {
 		t.Fatalf("expected claimed two-server release, got %#v", claimed)
 	}
-	logs, err := store.ListServerDeployLogs(ctx, claimed.Record.ID)
+	logs, err := store.ListDeployTargetLogs(ctx, claimed.Record.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +100,10 @@ func TestSQLiteClaimedServerGroupKeepsUnstartedServersQueued(t *testing.T) {
 			t.Fatalf("expected unstarted servers to remain queued, got %#v", logs)
 		}
 	}
-	if err := store.MarkServerRunning(ctx, claimed.Record.ID, claimed.Servers[0].ID); err != nil {
+	if err := store.MarkTargetRunning(ctx, claimed.Record.ID, claimed.Servers[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	logs, err = store.ListServerDeployLogs(ctx, claimed.Record.ID)
+	logs, err = store.ListDeployTargetLogs(ctx, claimed.Record.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,10 +162,10 @@ func TestSQLiteMockDeployPartialSkipsRemainingServers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.SuccessServers != 1 || record.FailedServers != 1 || record.SkippedServers != 1 {
+	if record.SuccessTargets != 1 || record.FailedTargets != 1 || record.SkippedTargets != 1 {
 		t.Fatalf("expected success=1 failed=1 skipped=1, got %#v", record)
 	}
-	logs, err := store.ListServerDeployLogs(ctx, deployID)
+	logs, err := store.ListDeployTargetLogs(ctx, deployID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestSQLiteMockDeployPartialSkipsRemainingServers(t *testing.T) {
 	if statuses["success"] != 1 || statuses["failed"] != 1 || statuses["skipped"] != 1 {
 		t.Fatalf("expected success/failed/skipped logs, got %#v", logs)
 	}
-	states, err := store.ListServerDeploymentStates(ctx)
+	states, err := store.ListDeploymentStates(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestSQLiteWorkerRecoversExpiredLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Status != "failed" || record.FailedServers != 1 {
+	if record.Status != "failed" || record.FailedTargets != 1 {
 		t.Fatalf("expected expired record failed, got %#v", record)
 	}
 	release, err := store.GetReleaseRequest(ctx, queued.ID)
@@ -361,7 +361,7 @@ func TestSQLiteWorkerRecoversExpiredLease(t *testing.T) {
 	if release.Status != "failed" || release.SummaryMessage != "worker lease expired" {
 		t.Fatalf("expected expired release failed, got %#v", release)
 	}
-	logs, err := store.ListServerDeployLogs(ctx, claimed.Record.ID)
+	logs, err := store.ListDeployTargetLogs(ctx, claimed.Record.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestSQLiteRollbackDeploy(t *testing.T) {
 	if err := workerService.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	states, err := store.ListServerDeploymentStates(ctx)
+	states, err := store.ListDeploymentStates(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func runMockReleaseWithNotifications(t *testing.T, ctx context.Context, db *sql.
 	if record.Status != want {
 		t.Fatalf("expected deploy %s, got %#v", want, record)
 	}
-	logs, err := store.ListServerDeployLogs(ctx, deployID)
+	logs, err := store.ListDeployTargetLogs(ctx, deployID)
 	if err != nil {
 		t.Fatal(err)
 	}

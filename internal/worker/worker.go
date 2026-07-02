@@ -81,20 +81,20 @@ func (s Service) RunOnce(ctx context.Context) error {
 		if failed {
 			break
 		}
-		if err := s.store.MarkServerRunning(ctx, claimed.Record.ID, server.ID); err != nil {
+		if err := s.store.MarkTargetRunning(ctx, claimed.Record.ID, server.ID); err != nil {
 			return err
 		}
 		result := s.execute(execCtx, claimed, server)
 		if err := heartbeatError(heartbeatErrors); err != nil {
 			return err
 		}
-		if err := s.store.MarkServerFinished(ctx, claimed.Record.ID, server.ID, result); err != nil {
+		if err := s.store.MarkTargetFinished(ctx, claimed.Record.ID, server.ID, result); err != nil {
 			return err
 		}
 		_, _ = s.store.CreateReleaseEvent(ctx, domain.ReleaseEvent{
 			ReleaseRequestID: claimed.Release.ID,
 			DeployRecordID:   claimed.Record.ID,
-			EventType:        "server_finished",
+			EventType:        "target_finished",
 			ActorType:        "system",
 			ActorID:          s.workerID,
 			Message:          result.Status + ": " + server.Name,
@@ -102,7 +102,7 @@ func (s Service) RunOnce(ctx context.Context) error {
 		failed = result.Status == "failed"
 	}
 	if failed {
-		if err := s.store.MarkQueuedServersSkipped(ctx, claimed.Record.ID, "skipped after previous server failure"); err != nil {
+		if err := s.store.MarkQueuedTargetsSkipped(ctx, claimed.Record.ID, "skipped after previous server failure"); err != nil {
 			return err
 		}
 	}
