@@ -17,7 +17,8 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 type ScalarValue = string | number | boolean | null | undefined;
-type Entity = Record<string, ScalarValue | string[]> & {
+type NestedEntity = Record<string, ScalarValue | string[]>;
+type Entity = Record<string, ScalarValue | string[] | NestedEntity> & {
   id?: ScalarValue;
   name?: ScalarValue;
   project_id?: ScalarValue;
@@ -28,6 +29,8 @@ type Entity = Record<string, ScalarValue | string[]> & {
   release_request_id?: ScalarValue;
   target_ref_id?: ScalarValue;
   target_type?: ScalarValue;
+  ssh?: NestedEntity;
+  k8s?: NestedEntity;
   executor_type?: ScalarValue;
   status?: ScalarValue;
   display_name?: ScalarValue;
@@ -65,6 +68,7 @@ type AppState = {
   environments: Entity[];
   servers: Entity[];
   serverGroups: Entity[];
+  k8sClusters: Entity[];
   targets: Entity[];
   users: Entity[];
   apiKeys: Entity[];
@@ -125,6 +129,7 @@ type ManagementView = 'overview' | 'users' | 'access' | 'notifications' | 'crede
 type CreatingKind =
   | 'project' | 'service' | 'version'
   | 'environment' | 'server' | 'server-group'
+  | 'k8s-cluster'
   | 'deployment-target';
 
 // 创建链式推进时的上游预填；creatingPrefill 为唯一预填来源，不 fallback 到 selection。
@@ -282,6 +287,7 @@ const emptyState: AppState = {
   environments: [],
   servers: [],
   serverGroups: [],
+  k8sClusters: [],
   targets: [],
   users: [],
   apiKeys: [],
@@ -399,6 +405,8 @@ export function App() {
       setNextCreateAction({ label: '建立部署连接', kind: 'deployment-target', prefill: { targetType: 'server', targetRefID: id } });
     } else if (kind === 'server-group') {
       setNextCreateAction({ label: '建立部署连接', kind: 'deployment-target', prefill: { targetType: 'server_group', targetRefID: id } });
+    } else if (kind === 'k8s-cluster') {
+      setNextCreateAction({ label: '建立部署连接', kind: 'deployment-target', prefill: {} });
     } else if (kind === 'deployment-target') {
       setNextCreateAction({ label: '创建发布单', kind: 'deployment-target', prefill: { serviceID: String(created.service_id ?? ''), environmentID: String(created.environment_id ?? '') }, goToCreate: true, targetID: id });
     }
@@ -438,10 +446,7 @@ export function App() {
     const environment = findByID(state.environments, selection.environmentID) ?? state.environments[0];
     const targetOptions = filterTargets(state.targets, service?.id, environment?.id);
     const target = findByID(targetOptions, selection.targetID) ?? targetOptions[0] ?? state.targets[0];
-    const targetRef =
-      target?.target_type === 'server_group'
-        ? findByID(state.serverGroups, target?.target_ref_id)
-        : findByID(state.servers, target?.target_ref_id);
+    const targetRef = target ? targetRefFor(target, state) : undefined;
     return {
       project: findByID(state.projects, service?.project_id) ?? state.projects[0],
       service,
@@ -527,6 +532,7 @@ export function App() {
         environments,
         servers,
         serverGroups,
+        k8sClusters,
         targets,
         users,
         apiKeys,
@@ -542,6 +548,7 @@ export function App() {
         apiGet<Entity[]>('/api/v1/environments'),
         apiGet<Entity[]>('/api/v1/servers'),
         apiGet<Entity[]>('/api/v1/server-groups'),
+        apiGet<Entity[]>('/api/v1/k8s-clusters'),
         apiGet<Entity[]>('/api/v1/deployment-targets'),
         apiGet<Entity[]>('/api/v1/users'),
         apiGet<Entity[]>('/api/v1/api-keys'),
@@ -576,6 +583,7 @@ export function App() {
         environments,
         servers,
         serverGroups,
+        k8sClusters,
         targets,
         users,
         apiKeys,
@@ -1081,7 +1089,7 @@ export function App() {
           </nav>
           <div className="header-actions">
             <span className={`health-dot ${status === 'ok' ? 'ok' : ''}`} title={`服务状态：${status}`} />
-            <span className="current-user">{currentUser.display_name ?? currentUser.username} <small>{roleLabel(currentUser.role)}</small></span>
+            <span className="current-user">{displayValue(currentUser.display_name ?? currentUser.username)} <small>{roleLabel(currentUser.role)}</small></span>
             <Button className="quiet-button" onClick={() => setPage('api-keys')}>访问密钥</Button>
             <Button className="quiet-button" onClick={() => void refreshAll()}>刷新</Button>
             <Button className="quiet-button" onClick={() => void signOut()}>退出</Button>
@@ -1142,7 +1150,7 @@ export function App() {
                     <span>版本来源 <strong>{selected.version?.source === 'ci' ? 'CI' : selected.version?.source === 'manual' ? '手动' : '-'}</strong></span>
                     <span>登记时间 <strong>{selected.version?.created_at ? formatDateTime(selected.version.created_at) : '-'}</strong></span>
                     <span>执行器 <strong>{selected.target?.executor_type ?? '-'}</strong></span>
-                    <span>操作身份 <strong>{selected.user?.display_name ?? selected.user?.username ?? '未选择'}</strong></span>
+                    <span>操作身份 <strong>{displayValue(selected.user?.display_name ?? selected.user?.username, '未选择')}</strong></span>
                   </div>
                   <div className="form-actions">
                     <Button loading={loading} onClick={() => void runPreflight()}>执行预检</Button>
@@ -1253,7 +1261,7 @@ export function App() {
                 <div className="infrastructure-flow" aria-label="发布配置关系">
                   <button onClick={() => setInfrastructureView('application')}>项目与服务 <strong>{state.services.length}</strong></button><i>→</i>
                   <button onClick={() => setInfrastructureView('application')}>版本 <strong>{state.versions.length}</strong></button><i>＋</i>
-                  <button onClick={() => setInfrastructureView('runtime')}>环境与服务器 <strong>{state.servers.length}</strong></button><i>→</i>
+                  <button onClick={() => setInfrastructureView('runtime')}>环境与运行资源 <strong>{state.servers.length + state.k8sClusters.length}</strong></button><i>→</i>
                   <button onClick={() => setInfrastructureView('targeting')}>部署目标 <strong>{state.targets.length}</strong></button>
                 </div>
               </section>
@@ -1261,7 +1269,7 @@ export function App() {
                 <nav className="infrastructure-nav" aria-label="配置模块">
                   <InfrastructureNavButton active={infrastructureView === 'overview'} label="配置概览" note="查看准备情况" count={state.targets.length} onClick={() => setInfrastructureView('overview')} />
                   <InfrastructureNavButton active={infrastructureView === 'application'} label="应用与版本" note="项目、服务、版本" count={state.services.length} onClick={() => setInfrastructureView('application')} />
-                  <InfrastructureNavButton active={infrastructureView === 'runtime'} label="运行环境" note="环境、服务器、服务器组" count={state.servers.length + state.serverGroups.length} onClick={() => setInfrastructureView('runtime')} />
+                  <InfrastructureNavButton active={infrastructureView === 'runtime'} label="运行环境" note="环境、服务器、K8s 集群" count={state.servers.length + state.serverGroups.length + state.k8sClusters.length} onClick={() => setInfrastructureView('runtime')} />
                   <InfrastructureNavButton active={infrastructureView === 'targeting'} label="部署连接" note="服务、环境与运行目标" count={state.targets.length} onClick={() => setInfrastructureView('targeting')} />
                   <InfrastructureNavButton active={infrastructureView === 'state'} label="当前状态" note="已部署版本视图" count={state.states.length} onClick={() => setInfrastructureView('state')} />
                 </nav>
@@ -1270,10 +1278,10 @@ export function App() {
                     <section className="surface infrastructure-summary"><SectionTitle title="配置准备情况" meta="RELEASE READINESS" /><div className="infrastructure-stat-grid">
                       <InfrastructureStat label="项目" value={state.projects.length} action="定义业务边界" onClick={() => setInfrastructureView('application')} />
                       <InfrastructureStat label="服务" value={state.services.length} action="注册发布对象" onClick={() => setInfrastructureView('application')} />
-                      <InfrastructureStat label="运行目标" value={state.servers.length + state.serverGroups.length} action="配置服务器或分组" onClick={() => setInfrastructureView('runtime')} />
+                      <InfrastructureStat label="运行资源" value={state.servers.length + state.serverGroups.length + state.k8sClusters.length} action="配置服务器或集群" onClick={() => setInfrastructureView('runtime')} />
                       <InfrastructureStat label="可发布连接" value={state.targets.filter((item) => item.enabled !== false).length} action="绑定服务与环境" onClick={() => setInfrastructureView('targeting')} />
                     </div></section>
-                    <section className="surface infrastructure-guide"><span className="mono-label">推荐顺序</span><h2>从首个对象到发布单。</h2><p>按发布实际依赖继续创建；SSH 服务器需要凭据时，会在服务器表单中直接提示创建。</p><div className="infrastructure-guide-actions"><button onClick={() => setInfrastructureView('application')}><strong>1. 定义应用</strong><small>{`${state.projects.length} 项目 / ${state.services.length} 服务 / ${state.versions.length} 版本`}</small><span>{state.projects.length > 0 && state.services.length > 0 && state.versions.length > 0 ? '查看应用与版本' : '创建项目、服务和版本'} →</span></button><button onClick={() => setInfrastructureView('runtime')}><strong>2. 准备运行环境</strong><small>{`${state.environments.length} 环境 / ${state.servers.length + state.serverGroups.length} 运行目标`}</small><span>{state.environments.length > 0 && state.servers.length + state.serverGroups.length > 0 ? '查看运行环境' : '创建环境和服务器'} →</span></button><button onClick={() => state.targets.some((item) => item.enabled !== false) ? setPage('create') : setInfrastructureView('targeting')}><strong>3. 建立部署连接</strong><small>{`${state.targets.filter((item) => item.enabled !== false).length} 个可发布部署目标`}</small><span>{state.targets.some((item) => item.enabled !== false) ? '创建发布单' : '连接服务、环境与目标'} →</span></button></div></section>
+                    <section className="surface infrastructure-guide"><span className="mono-label">推荐顺序</span><h2>从首个对象到发布单。</h2><p>按发布实际依赖继续创建；SSH 服务器需要凭据时，会在服务器表单中直接提示创建。</p><div className="infrastructure-guide-actions"><button onClick={() => setInfrastructureView('application')}><strong>1. 定义应用</strong><small>{`${state.projects.length} 项目 / ${state.services.length} 服务 / ${state.versions.length} 版本`}</small><span>{state.projects.length > 0 && state.services.length > 0 && state.versions.length > 0 ? '查看应用与版本' : '创建项目、服务和版本'} →</span></button><button onClick={() => setInfrastructureView('runtime')}><strong>2. 准备运行环境</strong><small>{`${state.environments.length} 环境 / ${state.servers.length + state.serverGroups.length + state.k8sClusters.length} 运行资源`}</small><span>{state.environments.length > 0 && state.servers.length + state.serverGroups.length + state.k8sClusters.length > 0 ? '查看运行环境' : '创建环境和运行资源'} →</span></button><button onClick={() => state.targets.some((item) => item.enabled !== false) ? setPage('create') : setInfrastructureView('targeting')}><strong>3. 建立部署连接</strong><small>{`${state.targets.filter((item) => item.enabled !== false).length} 个可发布部署目标`}</small><span>{state.targets.some((item) => item.enabled !== false) ? '创建发布单' : '连接服务、环境与目标'} →</span></button></div></section>
                   </> : null}
                   {infrastructureView === 'application' ? <>
                     <InfrastructureSectionHeading eyebrow="APPLICATION" title="应用与版本" description="这是发布内容的来源。先创建项目和服务，再为服务登记可部署版本。" />
@@ -1290,13 +1298,14 @@ export function App() {
                     </details>
                   </> : null}
                   {infrastructureView === 'runtime' ? <>
-                    <InfrastructureSectionHeading eyebrow="RUNTIME" title="运行环境" description="管理发布到哪里，以及哪些服务器作为一个批次共同执行。" />
+                    <InfrastructureSectionHeading eyebrow="RUNTIME" title="运行环境" description="管理发布到哪里，以及 SSH 服务器、服务器组和 Kubernetes 集群。" />
                     <div className="infrastructure-create-bar">
                       <Button type="primary" onClick={() => openCreator('environment')}>新建环境</Button>
                       <Button onClick={() => openCreator('server')}>新建服务器</Button>
                       <Button onClick={() => openCreator('server-group')}>新建服务器组</Button>
+                      <Button onClick={() => openCreator('k8s-cluster')}>新建 K8s 集群</Button>
                     </div>
-                    <section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="环境" data={state.environments} nameField="name" subFields={['slug', 'is_production']} frozenField="release_frozen" onOpen={(item) => openEditor(item, 'environment')} onToggleFrozen={(item, frozen) => void toggleEnvironmentFrozen(item, frozen)} /><EditableInventoryList title="服务器" data={state.servers} nameField="name" subFields={['host', 'role', 'username', 'last_check_status']} onOpen={(item) => openEditor(item, 'server')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server', enabled)} /><EditableInventoryList title="服务器组" data={state.serverGroups} nameField="name" subFields={['description']} onOpen={(item) => openEditor(item, 'server-group')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server-group', enabled)} /></div></section>
+                    <section className="surface infrastructure-inventory"><SectionTitle title="运行资源" meta="INVENTORY" /><div className="infrastructure-list-stack"><EditableInventoryList title="环境" data={state.environments} nameField="name" subFields={['slug', 'is_production']} frozenField="release_frozen" onOpen={(item) => openEditor(item, 'environment')} onToggleFrozen={(item, frozen) => void toggleEnvironmentFrozen(item, frozen)} /><EditableInventoryList title="服务器" data={state.servers} nameField="name" subFields={['host', 'role', 'username', 'last_check_status']} onOpen={(item) => openEditor(item, 'server')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server', enabled)} /><EditableInventoryList title="服务器组" data={state.serverGroups} nameField="name" subFields={['description']} onOpen={(item) => openEditor(item, 'server-group')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'server-group', enabled)} /><EditableInventoryList title="K8s 集群" data={state.k8sClusters} nameField="name" subFields={['credential_ref']} onOpen={(item) => openEditor(item, 'k8s-cluster')} onToggleEnabled={(item, enabled) => void toggleEntityEnabled(item, 'k8s-cluster', enabled)} /></div></section>
                   </> : null}
                   {infrastructureView === 'targeting' ? <>
                     <InfrastructureSectionHeading eyebrow="DEPLOYMENT TARGET" title="部署连接" description="把服务、环境与服务器或服务器组组合为发布时可选择的部署目标。" />
@@ -1317,7 +1326,8 @@ export function App() {
                 <EnvironmentEditorDrawer open={!!editingEntity && editingEntity._kind === 'environment'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} />
                 <ServerEditorDrawer open={!!editingEntity && editingEntity._kind === 'server'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} credentials={state.credentials} />
                 <ServerGroupEditorDrawer open={!!editingEntity && editingEntity._kind === 'server-group'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} />
-                <DeploymentTargetEditorDrawer open={!!editingEntity && editingEntity._kind === 'deployment-target'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} serverGroups={state.serverGroups} />
+                <K8sClusterEditorDrawer open={!!editingEntity && editingEntity._kind === 'k8s-cluster'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} credentials={state.credentials} />
+                <DeploymentTargetEditorDrawer open={!!editingEntity && editingEntity._kind === 'deployment-target'} selected={editingEntity ?? undefined} onClose={closeEditor} onDone={() => { void refreshAll(); closeEditor(); }} servers={state.servers} serverGroups={state.serverGroups} k8sClusters={state.k8sClusters} />
                 <Drawer title={creatingKind ? createDrawerTitles[creatingKind] : ''} open={creatingKind !== null} onClose={closeCreator} width={520} footer={null} destroyOnClose>
                   {creatingKind === 'project' ? <ProjectForm onDone={(project) => handleCreated('project', project)} /> : null}
                   {creatingKind === 'service' ? <ServiceForm projects={state.projects} selectedProjectID={creatingPrefill.projectID} onDone={(service) => handleCreated('service', service)} /> : null}
@@ -1325,12 +1335,14 @@ export function App() {
                   {creatingKind === 'environment' ? <EnvironmentForm onDone={(environment) => handleCreated('environment', environment)} /> : null}
                   {creatingKind === 'server' ? <ServerForm servers={state.servers} credentials={state.credentials} onCredentialsChanged={() => void refreshAll()} onDone={(server) => handleCreated('server', server)} /> : null}
                   {creatingKind === 'server-group' ? <ServerGroupForm servers={state.servers} onDone={(group) => handleCreated('server-group', group)} /> : null}
+                  {creatingKind === 'k8s-cluster' ? <K8sClusterForm credentials={state.credentials} onDone={(cluster) => handleCreated('k8s-cluster', cluster)} /> : null}
                   {creatingKind === 'deployment-target' ? (
                     <DeploymentTargetForm
                       services={state.services}
                       environments={state.environments}
                       servers={state.servers}
                       serverGroups={state.serverGroups}
+                      k8sClusters={state.k8sClusters}
                       selectedServiceID={creatingPrefill.serviceID ?? ''}
                       selectedEnvironmentID={creatingPrefill.environmentID ?? ''}
                       preferredTargetRef={{ targetType: creatingPrefill.targetType ?? '', targetRefID: creatingPrefill.targetRefID ?? '' }}
@@ -1387,14 +1399,14 @@ export function App() {
 
           {page === 'management' ? <>
             <PageHeading eyebrow="ADMINISTRATION" title="管理控制台" description="管理人员、访问凭据和通知集成。高风险配置按职责单独处理。" />
-            <section className="surface management-brief"><div><span className="mono-label">管理边界</span><h2>谁可以发布，系统如何连接与通知。</h2><p>用户与访问密钥控制访问；凭据仅供服务器连接引用；通知投递失败不会阻塞发布。</p></div><div className="management-risk-notes"><span><b>01</b> 用户角色决定生产发布确认权限</span><span><b>02</b> 访问密钥明文只在创建时出现</span><span><b>03</b> 凭据与 Webhook 不会在列表中回显</span></div></section>
-            <section className="management-layout"><nav className="management-nav" aria-label="管理模块"><ManagementNavButton active={managementView === 'overview'} label="管理概览" note="查看关键状态" count={state.users.length} onClick={() => setManagementView('overview')} /><ManagementNavButton active={managementView === 'users'} label="用户与权限" note="确认发布身份" count={state.users.length} onClick={() => setManagementView('users')} /><ManagementNavButton active={managementView === 'access'} label="集成访问密钥" note="访问密钥与 scopes" count={state.apiKeys.length} onClick={() => setManagementView('access')} /><ManagementNavButton active={managementView === 'notifications'} label="通知与投递" note="机器人与发送记录" count={state.notificationConfigs.length} onClick={() => setManagementView('notifications')} /><ManagementNavButton active={managementView === 'credentials'} label="连接凭据" note="SSH 认证材料" count={state.credentials.length} onClick={() => setManagementView('credentials')} /></nav>
+            <section className="surface management-brief"><div><span className="mono-label">管理边界</span><h2>谁可以发布，系统如何连接与通知。</h2><p>用户与访问密钥控制访问；凭据供 SSH 服务器和 K8s 集群连接引用；通知投递失败不会阻塞发布。</p></div><div className="management-risk-notes"><span><b>01</b> 用户角色决定生产发布确认权限</span><span><b>02</b> 访问密钥明文只在创建时出现</span><span><b>03</b> 凭据与 Webhook 不会在列表中回显</span></div></section>
+            <section className="management-layout"><nav className="management-nav" aria-label="管理模块"><ManagementNavButton active={managementView === 'overview'} label="管理概览" note="查看关键状态" count={state.users.length} onClick={() => setManagementView('overview')} /><ManagementNavButton active={managementView === 'users'} label="用户与权限" note="确认发布身份" count={state.users.length} onClick={() => setManagementView('users')} /><ManagementNavButton active={managementView === 'access'} label="集成访问密钥" note="访问密钥与 scopes" count={state.apiKeys.length} onClick={() => setManagementView('access')} /><ManagementNavButton active={managementView === 'notifications'} label="通知与投递" note="机器人与发送记录" count={state.notificationConfigs.length} onClick={() => setManagementView('notifications')} /><ManagementNavButton active={managementView === 'credentials'} label="连接凭据" note="SSH / Kubeconfig" count={state.credentials.length} onClick={() => setManagementView('credentials')} /></nav>
               <div className="management-workspace">
                 {managementView === 'overview' ? <><section className="surface management-summary"><SectionTitle title="管理状态" meta="CONTROL PLANE" /><div className="management-stat-grid"><ManagementStat label="可用用户" value={state.users.filter((item) => item.enabled !== false).length} note="可登录并参与发布" onClick={() => setManagementView('users')} /><ManagementStat label="启用访问密钥" value={state.apiKeys.filter((item) => item.enabled !== false).length} note="供 CI/CD 和脚本调用" onClick={() => setManagementView('access')} /><ManagementStat label="启用通知" value={state.notificationConfigs.filter((item) => item.enabled !== false).length} note="企业微信机器人" onClick={() => setManagementView('notifications')} /><ManagementStat label="投递异常" value={state.notificationDeliveries.filter((item) => item.status !== 'sent').length} note="查看最近失败原因" onClick={() => setManagementView('notifications')} /></div></section><section className="surface management-guide"><span className="mono-label">日常管理</span><h2>只在需要时打开对应的管理面板。</h2><div><button onClick={() => setManagementView('users')}>新增发布用户 <span>用户与权限 →</span></button><button onClick={() => setManagementView('access')}>创建 CI/CD 访问密钥 <span>集成访问密钥 →</span></button><button onClick={() => setManagementView('notifications')}>测试通知机器人 <span>通知与投递 →</span></button></div></section></> : null}
                 {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('user')}>新建用户</Button></div><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onDone={() => void refreshAll()} /></section></> : null}
                 {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('api-key')}>新建访问密钥</Button></div><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section></> : null}
                 {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('notification')}>新建通知配置</Button></div><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><NotificationDeliveryList data={state.notificationDeliveries} configs={state.notificationConfigs} /></section></> : null}
-                {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据只供服务器 SSH 连接引用；Secret 不会在创建后再次展示。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('credential')}>新建凭据</Button></div><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><CredentialList data={state.credentials} servers={state.servers} onDone={() => void refreshAll()} /></section></> : null}
+                {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据供 SSH 服务器和 K8s 集群连接引用；Secret 不会在创建后再次展示。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('credential')}>新建凭据</Button></div><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><CredentialList data={state.credentials} servers={state.servers} k8sClusters={state.k8sClusters} onDone={() => void refreshAll()} /></section></> : null}
               </div>
               <Drawer title={mgmtCreatingKind ? mgmtCreateTitles[mgmtCreatingKind] : ''} open={mgmtCreatingKind !== null} onClose={() => setMgmtCreatingKind(null)} width={520} footer={null} destroyOnClose>
                 {mgmtCreatingKind === 'user' ? <UserForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
@@ -1466,7 +1478,7 @@ function DependencyChecklist({ state, onOpenApplication, onOpenRuntime }: { stat
   const items = [
     { label: '服务与版本', complete: state.services.length > 0 && state.versions.length > 0, onClick: onOpenApplication },
     { label: '环境', complete: state.environments.length > 0, onClick: onOpenRuntime },
-    { label: '服务器或服务器组', complete: state.servers.length + state.serverGroups.length > 0, onClick: onOpenRuntime },
+    { label: '运行资源', complete: state.servers.length + state.serverGroups.length + state.k8sClusters.length > 0, onClick: onOpenRuntime },
   ];
   if (items.every((item) => item.complete)) return null;
   return (
@@ -1487,12 +1499,12 @@ function ReleaseRows({ data, state, onOpen }: { data: Entity[]; state: AppState;
 
 function DeployRows({ data, state, onOpen }: { data: Entity[]; state: AppState; onOpen: (item: Entity) => void }) {
   if (data.length === 0) return <div className="inline-empty">暂无发布记录。</div>;
-  return <div className="deploy-list">{data.map((item) => <button className="deploy-row" key={String(item.id)} onClick={() => onOpen(item)}><span><strong>{shortID(item.id)}</strong><small>{formatDeployContext(item, state)}</small></span><span className="server-counts">成功 {item.success_targets ?? 0} / 失败 {item.failed_targets ?? 0} / 跳过 {item.skipped_targets ?? 0}</span><StatusTag value={String(item.status)} /><span aria-hidden="true">→</span></button>)}</div>;
+  return <div className="deploy-list">{data.map((item) => <button className="deploy-row" key={String(item.id)} onClick={() => onOpen(item)}><span><strong>{shortID(item.id)}</strong><small>{formatDeployContext(item, state)}</small></span><span className="server-counts">成功 {displayValue(item.success_targets, '0')} / 失败 {displayValue(item.failed_targets, '0')} / 跳过 {displayValue(item.skipped_targets, '0')}</span><StatusTag value={String(item.status)} /><span aria-hidden="true">→</span></button>)}</div>;
 }
 
 function EventRows({ data, state }: { data: Entity[]; state: AppState }) {
   if (data.length === 0) return <div className="inline-empty">暂无事件。</div>;
-  return <div className="event-list">{data.map((item) => <div className="event-row" key={String(item.id)}><span className="event-dot" /><div><strong>{item.event_type}</strong><p>{item.message ?? '—'}</p><small>{formatEventContext(item, state)}</small></div></div>)}</div>;
+  return <div className="event-list">{data.map((item) => <div className="event-row" key={String(item.id)}><span className="event-dot" /><div><strong>{displayValue(item.event_type)}</strong><p>{displayValue(item.message, '—')}</p><small>{formatEventContext(item, state)}</small></div></div>)}</div>;
 }
 
 function ServerLogRows({ data, state }: { data: Entity[]; state: AppState }) {
@@ -1502,7 +1514,7 @@ function ServerLogRows({ data, state }: { data: Entity[]; state: AppState }) {
     // queued/running 阶段尚无输出属正常，避免误判为故障。
     const pending = status === 'queued' || status === 'running';
     const output = item.error_message || item.log_output || (pending ? '执行中，暂无输出' : '暂无输出');
-    return <article className="server-log-row" key={String(item.id)}><div><strong>{formatServerRef(item.server_id, state)}</strong><StatusTag value={status} /></div><small>{`开始：${formatDateTime(item.started_at)} · 结束：${formatDateTime(item.finished_at)} · 耗时：${item.duration_ms ?? 0}ms`}</small>{item.error_code ? <code>{item.error_code}</code> : null}<pre>{String(output)}</pre></article>;
+    return <article className="server-log-row" key={String(item.id)}><div><strong>{displayValue(item.target_name) || formatServerRef(item.server_id, state)}</strong><StatusTag value={status} /></div><small>{`开始：${formatDateTime(item.started_at)} · 结束：${formatDateTime(item.finished_at)} · 耗时：${displayValue(item.duration_ms, '0')}ms`}</small>{item.error_code ? <code>{displayValue(item.error_code)}</code> : null}<pre>{String(output)}</pre></article>;
   })}</div>;
 }
 
@@ -1727,7 +1739,7 @@ function ServiceDetail({ service, versions, targets, environments, states }: { s
   const environmentIDs = new Set(serviceTargets.map((item) => String(item.environment_id)));
   const availableEnvironments = environments.filter((item) => environmentIDs.has(String(item.id)));
   const serviceStates = states.filter((item) => String(item.service_id) === String(service.id));
-  return <div className="service-detail-grid"><div><span className="mono-label">服务</span><h3>{service.name}</h3><p>{service.description || '暂无描述'}</p><KeyValueGrid values={[["可用环境", availableEnvironments.length], ["部署目标", serviceTargets.length], ["历史版本", versions.length], ["当前部署版本", serviceStates.length]]} /></div><div><span className="mono-label">可用环境</span><div className="detail-chip-list">{availableEnvironments.length ? availableEnvironments.map((item) => <span className={item.is_production ? 'detail-chip production' : 'detail-chip'} key={String(item.id)}>{item.name}{item.is_production ? ' · 生产' : ''}</span>) : <span className="detail-muted">尚未配置部署目标</span>}</div><span className="mono-label">部署目标</span><div className="detail-list">{serviceTargets.map((item) => <div key={String(item.id)}><strong>{item.executor_type} / {item.target_type}</strong><small>{`${environments.find((environment) => String(environment.id) === String(item.environment_id))?.name ?? item.environment_id} · ${item.enabled === false ? '已停用' : '已启用'}`}</small></div>)}</div></div><div><span className="mono-label">最近版本</span><div className="detail-list">{versions.length ? versions.slice(0, 6).map((item) => { const runURL = versionRunURL(item.metadata); return <div key={String(item.id)}><strong>{item.version}</strong><Tag color={item.source === 'ci' ? 'blue' : 'default'}>{item.source === 'ci' ? 'CI' : '手动'}</Tag><small>{`${item.commit_sha ? String(item.commit_sha).slice(0, 8) : '无 commit'} · ${maskArtifactURL(item.artifact_url)}`}</small>{runURL ? <a className="detail-link" href={runURL} target="_blank" rel="noreferrer">外部运行</a> : null}</div>; }) : <span className="detail-muted">暂无版本</span>}</div></div></div>;
+  return <div className="service-detail-grid"><div><span className="mono-label">服务</span><h3>{displayValue(service.name)}</h3><p>{displayValue(service.description, '暂无描述')}</p><KeyValueGrid values={[["可用环境", availableEnvironments.length], ["部署目标", serviceTargets.length], ["历史版本", versions.length], ["当前部署版本", serviceStates.length]]} /></div><div><span className="mono-label">可用环境</span><div className="detail-chip-list">{availableEnvironments.length ? availableEnvironments.map((item) => <span className={item.is_production ? 'detail-chip production' : 'detail-chip'} key={String(item.id)}>{displayValue(item.name)}{item.is_production ? ' · 生产' : ''}</span>) : <span className="detail-muted">尚未配置部署目标</span>}</div><span className="mono-label">部署目标</span><div className="detail-list">{serviceTargets.map((item) => <div key={String(item.id)}><strong>{formatTarget(item)}</strong><small>{`${displayValue(environments.find((environment) => String(environment.id) === String(item.environment_id))?.name ?? item.environment_id)} · ${item.enabled === false ? '已停用' : '已启用'}`}</small></div>)}</div></div><div><span className="mono-label">最近版本</span><div className="detail-list">{versions.length ? versions.slice(0, 6).map((item) => { const runURL = versionRunURL(item.metadata); return <div key={String(item.id)}><strong>{displayValue(item.version)}</strong><Tag color={item.source === 'ci' ? 'blue' : 'default'}>{item.source === 'ci' ? 'CI' : '手动'}</Tag><small>{`${item.commit_sha ? String(item.commit_sha).slice(0, 8) : '无 commit'} · ${maskArtifactURL(item.artifact_url)}`}</small>{runURL ? <a className="detail-link" href={runURL} target="_blank" rel="noreferrer">外部运行</a> : null}</div>; }) : <span className="detail-muted">暂无版本</span>}</div></div></div>;
 }
 
 function maskArtifactURL(value: Entity[string]) {
@@ -1841,6 +1853,7 @@ function entityEndpoint(selected: Entity): string {
     case 'environment': return '/api/v1/environments';
     case 'server': return '/api/v1/servers';
     case 'server-group': return '/api/v1/server-groups';
+    case 'k8s-cluster': return '/api/v1/k8s-clusters';
     case 'deployment-target': return '/api/v1/deployment-targets';
     default: return '/api/v1';
   }
@@ -1946,7 +1959,7 @@ function ServerEditorDrawer({ open, selected, onClose, onDone, servers, credenti
           <Button loading={testing} onClick={() => void test()}>测试 SSH</Button>
           <Button onClick={onClose}>取消</Button>
         </Space>
-        {testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{selected?.last_check_status ?? '未测试'} / {formatDateTime(selected?.last_check_at)}</Typography.Text>}
+        {testResult ? <div className="test-result">{testResult}</div> : <Typography.Text type="secondary">最近测试：{displayValue(selected?.last_check_status, '未测试')} / {formatDateTime(selected?.last_check_at)}</Typography.Text>}
       </Form>
     </Drawer>
   );
@@ -1963,12 +1976,24 @@ function ServerGroupEditorDrawer({ open, selected, onClose, onDone, servers }: {
   );
 }
 
-function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers, serverGroups }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; servers: Entity[]; serverGroups: Entity[] }) {
+function K8sClusterEditorDrawer({ open, selected, onClose, onDone, credentials }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; credentials: Entity[] }) {
+  const kubeconfigCredentials = credentials.filter((item) => item.type === 'kubeconfig' && item.enabled !== false);
+  return (
+    <EntityDrawer open={open} title="编辑 K8s 集群" selected={selected} onClose={onClose} onDone={onDone} fields={() => <>
+      <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="credential_ref" label="Kubeconfig 凭据" rules={[{ required: true }]}><Select options={kubeconfigCredentials.map(entityOption)} /></Form.Item>
+      <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+    </>} />
+  );
+}
+
+function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers, serverGroups, k8sClusters }: { open: boolean; selected: Entity | undefined; onClose: () => void; onDone: (id: string) => void; servers: Entity[]; serverGroups: Entity[]; k8sClusters: Entity[] }) {
   const [form] = Form.useForm();
-  const targetType = Form.useWatch('target_type', form) as string | undefined;
+  const executorType = Form.useWatch('executor_type', form) as string | undefined;
+  const targetType = Form.useWatch(['ssh', 'target_type'], form) as string | undefined;
   useEffect(() => {
     if (open && selected) {
-      form.setFieldsValue(selected);
+      form.setFieldsValue(deploymentTargetFormValues(selected));
     }
   }, [open, selected, form]);
   const targetOptions = targetType === 'server_group' ? serverGroups : servers;
@@ -1981,6 +2006,9 @@ function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers
       return;
     }
     try {
+      if (values.executor_type === 'k8s') {
+        values.artifact_type = 'oci_image';
+      }
       await apiPatch<Entity>(`/api/v1/deployment-targets/${selected.id}`, values);
       onDone(String(selected.id ?? ''));
     } catch (err) {
@@ -1990,13 +2018,20 @@ function DeploymentTargetEditorDrawer({ open, selected, onClose, onDone, servers
   return (
     <Drawer title="编辑部署目标" open={open} onClose={onClose} width={520} footer={null} destroyOnClose>
       <Form form={form} layout="vertical">
-        <Form.Item name="target_type" label="目标类型"><Select options={[{ label: '服务器', value: 'server' }, { label: '服务器组', value: 'server_group' }]} /></Form.Item>
-        <Form.Item name="target_ref_id" label="运行目标"><Select options={targetOptions.map(entityOption)} /></Form.Item>
-        <Form.Item name="executor_type" label="执行器"><Select options={[{ label: 'mock', value: 'mock' }, { label: 'ssh', value: 'ssh' }]} /></Form.Item>
+        <Form.Item name="executor_type" label="执行器"><Select options={[{ label: 'mock', value: 'mock' }, { label: 'ssh', value: 'ssh' }, { label: 'k8s', value: 'k8s' }]} /></Form.Item>
         <Form.Item name="artifact_type" label="制品类型" tooltip="oci_image 要求版本 artifact_url 为完整 digest 引用；version_only 由脚本按版本号自行解析"><Select options={[{ label: 'version_only（按版本号解析）', value: 'version_only' }, { label: 'oci_image（OCI 镜像 digest）', value: 'oci_image' }]} /></Form.Item>
-        <Form.Item name="script_path" label="Script Path"><Input /></Form.Item>
-        <Form.Item name="working_dir" label="Working Dir"><Input /></Form.Item>
-        <Form.Item name="env_vars" label="环境变量 JSON"><Input.TextArea rows={3} /></Form.Item>
+        {executorType === 'k8s' ? <>
+          <Form.Item name={['k8s', 'cluster_id']} label="K8s 集群" rules={[{ required: true }]}><Select options={k8sClusters.map(entityOption)} /></Form.Item>
+          <Form.Item name={['k8s', 'namespace']} label="Namespace" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name={['k8s', 'deployment_name']} label="Deployment" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name={['k8s', 'container_name']} label="容器" rules={[{ required: true }]}><Input /></Form.Item>
+        </> : <>
+          <Form.Item name={['ssh', 'target_type']} label="目标类型"><Select options={[{ label: '服务器', value: 'server' }, { label: '服务器组', value: 'server_group' }]} /></Form.Item>
+          <Form.Item name={['ssh', 'target_ref_id']} label={targetType === 'server_group' ? '服务器组' : '服务器'}><Select options={targetOptions.map(entityOption)} /></Form.Item>
+          <Form.Item name={['ssh', 'script_path']} label="Script Path"><Input /></Form.Item>
+          <Form.Item name={['ssh', 'working_dir']} label="Working Dir"><Input /></Form.Item>
+          <Form.Item name={['ssh', 'env_vars']} label="环境变量 JSON"><Input.TextArea rows={3} /></Form.Item>
+        </>}
         <Form.Item name="timeout_seconds" label="超时秒数"><Input type="number" min={1} /></Form.Item>
         <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
         <Space>
@@ -2017,6 +2052,7 @@ const createDrawerTitles: Record<CreatingKind, string> = {
   environment: '新建环境',
   server: '新建服务器',
   'server-group': '新建服务器组',
+  'k8s-cluster': '新建 K8s 集群',
   'deployment-target': '新建部署目标',
 };
 
@@ -2361,11 +2397,38 @@ function ServerGroupForm({ servers, onDone }: { servers: Entity[]; onDone: (serv
   );
 }
 
+function K8sClusterForm({ credentials, onDone }: { credentials: Entity[]; onDone: (cluster: Entity) => void }) {
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
+  const kubeconfigCredentials = credentials.filter((item) => item.type === 'kubeconfig' && item.enabled !== false);
+  async function submit(values: Entity) {
+    setLoading(true);
+    try {
+      const cluster = await apiPost<Entity>('/api/v1/k8s-clusters', values);
+      form.resetFields();
+      onDone(cluster);
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Form form={form} layout="vertical" initialValues={{ enabled: true }} onFinish={(values) => void submit(values)}>
+      <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="credential_ref" label="Kubeconfig 凭据" rules={[{ required: true }]}>
+        <Select options={kubeconfigCredentials.map(entityOption)} />
+      </Form.Item>
+      <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
+      <Button type="primary" htmlType="submit" loading={loading}>创建 K8s 集群</Button>
+    </Form>
+  );
+}
+
 function DeploymentTargetForm({
   services,
   environments,
   servers,
   serverGroups,
+  k8sClusters,
   selectedServiceID,
   selectedEnvironmentID,
   preferredTargetRef,
@@ -2375,6 +2438,7 @@ function DeploymentTargetForm({
   environments: Entity[];
   servers: Entity[];
   serverGroups: Entity[];
+  k8sClusters: Entity[];
   selectedServiceID: string;
   selectedEnvironmentID: string;
   preferredTargetRef: ManualTargetRef;
@@ -2382,18 +2446,18 @@ function DeploymentTargetForm({
 }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const targetType = Form.useWatch('target_type', form) ?? 'server';
+  const executorType = Form.useWatch('executor_type', form) ?? 'mock';
+  const targetType = Form.useWatch(['ssh', 'target_type'], form) ?? 'server';
   const targetOptions = targetType === 'server_group' ? serverGroups : servers;
   useEffect(() => {
-    const current = form.getFieldsValue(['service_id', 'environment_id', 'target_ref_id']);
-    const nextValues: Partial<Entity> = {};
+    const current = form.getFieldsValue(true) as Entity;
+    const nextValues: Record<string, unknown> = {};
     const preferredOptions = preferredTargetRef.targetType === 'server_group' ? serverGroups : servers;
     const hasPreferredTarget =
       preferredTargetRef.targetRefID &&
       preferredOptions.some((item) => String(item.id) === preferredTargetRef.targetRefID);
     if (hasPreferredTarget) {
-      nextValues.target_type = preferredTargetRef.targetType;
-      nextValues.target_ref_id = preferredTargetRef.targetRefID;
+      nextValues.ssh = { target_type: preferredTargetRef.targetType, target_ref_id: preferredTargetRef.targetRefID };
     }
     if (!current.service_id && selectedServiceID) {
       nextValues.service_id = selectedServiceID;
@@ -2401,19 +2465,25 @@ function DeploymentTargetForm({
     if (!current.environment_id && selectedEnvironmentID) {
       nextValues.environment_id = selectedEnvironmentID;
     }
-    if (!hasPreferredTarget && !current.target_ref_id && targetOptions[0]?.id) {
-      nextValues.target_ref_id = String(targetOptions[0].id);
+    if (!hasPreferredTarget && !nestedValue(current.ssh, 'target_ref_id') && targetOptions[0]?.id) {
+      nextValues.ssh = { ...(nextValues.ssh as NestedEntity | undefined), target_ref_id: String(targetOptions[0].id) };
+    }
+    if (!nestedValue(current.k8s, 'cluster_id') && k8sClusters[0]?.id) {
+      nextValues.k8s = { cluster_id: String(k8sClusters[0].id) };
     }
     if (Object.keys(nextValues).length > 0) {
       form.setFieldsValue(nextValues);
     }
-  }, [form, preferredTargetRef, selectedEnvironmentID, selectedServiceID, serverGroups, servers, targetOptions]);
+  }, [form, k8sClusters, preferredTargetRef, selectedEnvironmentID, selectedServiceID, serverGroups, servers, targetOptions]);
   async function submit(values: Entity) {
     setLoading(true);
     try {
+      if (values.executor_type === 'k8s') {
+        values.artifact_type = 'oci_image';
+      }
       const target = await apiPost<Entity>('/api/v1/deployment-targets', {
         ...values,
-        env_vars: values.env_vars || '{}',
+        ssh: values.executor_type === 'k8s' ? undefined : { ...(nestedObject(values.ssh)), env_vars: nestedValue(values.ssh, 'env_vars') || '{}' },
         timeout_seconds: Number(values.timeout_seconds || 60),
       });
       form.resetFields();
@@ -2426,7 +2496,7 @@ function DeploymentTargetForm({
     <Form
       form={form}
       layout="vertical"
-      initialValues={{ executor_type: 'mock', target_type: 'server', artifact_type: 'version_only', env_vars: '{}', timeout_seconds: 60 }}
+      initialValues={{ executor_type: 'mock', artifact_type: 'version_only', ssh: { target_type: 'server', env_vars: '{}' }, timeout_seconds: 60 }}
       onFinish={(values) => void submit(values)}
     >
       <Form.Item name="service_id" label="服务" rules={[{ required: true }]}>
@@ -2435,24 +2505,18 @@ function DeploymentTargetForm({
       <Form.Item name="environment_id" label="环境" rules={[{ required: true }]}>
         <Select options={environments.map(entityOption)} />
       </Form.Item>
-      <Form.Item name="target_type" label="目标类型" rules={[{ required: true }]}>
-        <Select
-          options={[
-            { label: 'server', value: 'server' },
-            { label: 'server_group', value: 'server_group' },
-          ]}
-          onChange={() => form.setFieldValue('target_ref_id', undefined)}
-        />
-      </Form.Item>
-      <Form.Item name="target_ref_id" label={targetType === 'server_group' ? '服务器组' : '服务器'} rules={[{ required: true }]}>
-        <Select options={targetOptions.map(entityOption)} />
-      </Form.Item>
       <Form.Item name="executor_type" label="执行器" rules={[{ required: true }]}>
         <Select
           options={[
             { label: 'mock', value: 'mock' },
             { label: 'ssh', value: 'ssh' },
+            { label: 'k8s', value: 'k8s' },
           ]}
+          onChange={(value) => {
+            if (value === 'k8s') {
+              form.setFieldValue('artifact_type', 'oci_image');
+            }
+          }}
         />
       </Form.Item>
       <Form.Item name="artifact_type" label="制品类型" tooltip="oci_image 要求版本 artifact_url 为完整 digest 引用；version_only 由脚本按版本号自行解析">
@@ -2463,15 +2527,36 @@ function DeploymentTargetForm({
           ]}
         />
       </Form.Item>
-      <Form.Item name="script_path" label="Script Path">
-        <Input />
-      </Form.Item>
-      <Form.Item name="working_dir" label="Working Dir">
-        <Input />
-      </Form.Item>
-      <Form.Item name="env_vars" label="Env Vars JSON">
-        <Input.TextArea rows={3} />
-      </Form.Item>
+      {executorType === 'k8s' ? <>
+        <Form.Item name={['k8s', 'cluster_id']} label="K8s 集群" rules={[{ required: true }]}>
+          <Select options={k8sClusters.map(entityOption)} />
+        </Form.Item>
+        <Form.Item name={['k8s', 'namespace']} label="Namespace" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name={['k8s', 'deployment_name']} label="Deployment" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name={['k8s', 'container_name']} label="容器" rules={[{ required: true }]}><Input /></Form.Item>
+      </> : <>
+        <Form.Item name={['ssh', 'target_type']} label="目标类型" rules={[{ required: true }]}>
+          <Select
+            options={[
+              { label: 'server', value: 'server' },
+              { label: 'server_group', value: 'server_group' },
+            ]}
+            onChange={() => form.setFieldValue(['ssh', 'target_ref_id'], undefined)}
+          />
+        </Form.Item>
+        <Form.Item name={['ssh', 'target_ref_id']} label={targetType === 'server_group' ? '服务器组' : '服务器'} rules={[{ required: true }]}>
+          <Select options={targetOptions.map(entityOption)} />
+        </Form.Item>
+        <Form.Item name={['ssh', 'script_path']} label="Script Path">
+          <Input />
+        </Form.Item>
+        <Form.Item name={['ssh', 'working_dir']} label="Working Dir">
+          <Input />
+        </Form.Item>
+        <Form.Item name={['ssh', 'env_vars']} label="Env Vars JSON">
+          <Input.TextArea rows={3} />
+        </Form.Item>
+      </>}
       <Form.Item name="timeout_seconds" label="Timeout Seconds">
         <Input type="number" min={1} />
       </Form.Item>
@@ -2543,7 +2628,7 @@ function UserList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
             <div className="data-row">
               <div className="data-main">
                 <Space>
-                  <Typography.Text strong>{item.display_name ?? item.username ?? item.id}</Typography.Text>
+                  <Typography.Text strong>{displayValue(item.display_name ?? item.username ?? item.id)}</Typography.Text>
                   <StatusTag value={enabled ? 'enabled' : 'disabled'} />
                 </Space>
                 <Typography.Text type="secondary">{`${item.username ?? '-'} / ${roleLabel(item.role)}`}</Typography.Text>
@@ -2734,6 +2819,7 @@ function CredentialForm({ onDone }: { onDone: (credential: Entity) => void }) {
           options={[
             { label: 'private_key', value: 'private_key' },
             { label: 'password', value: 'password' },
+            { label: 'kubeconfig', value: 'kubeconfig' },
           ]}
         />
       </Form.Item>
@@ -2747,7 +2833,7 @@ function CredentialForm({ onDone }: { onDone: (credential: Entity) => void }) {
   );
 }
 
-function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: Entity[]; onDone: () => void }) {
+function CredentialList({ data, servers, k8sClusters, onDone }: { data: Entity[]; servers: Entity[]; k8sClusters: Entity[]; onDone: () => void }) {
   const [editingID, setEditingID] = useState('');
   const [busyID, setBusyID] = useState('');
   const [form] = Form.useForm();
@@ -2792,10 +2878,16 @@ function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: En
       setBusyID('');
     }
   }
-  // 计算引用该凭据的服务器，供禁用/删除提示
-  function referencedServers(credentialID: ScalarValue) {
+  // 计算引用该凭据的运行资源，供禁用/删除提示
+  function referencedResources(credentialID: ScalarValue) {
     const id = scalarRef(credentialID);
-    return servers.filter((server) => scalarRef(server.credential_ref) === id);
+    const serverRefs = servers
+      .filter((server) => scalarRef(server.credential_ref) === id)
+      .map((server) => `服务器 ${displayValue(server.name ?? server.id)}`);
+    const clusterRefs = k8sClusters
+      .filter((cluster) => scalarRef(cluster.credential_ref) === id)
+      .map((cluster) => `K8s 集群 ${displayValue(cluster.name ?? cluster.id)}`);
+    return [...serverRefs, ...clusterRefs];
   }
   return (
     <div className="mini-list">
@@ -2804,7 +2896,7 @@ function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: En
         data={data}
         renderItem={(item) => {
           const enabled = item.enabled !== false;
-          const refs = referencedServers(item.id);
+          const refs = referencedResources(item.id);
           return (
             <div className="data-row">
               <div className="data-main">
@@ -2813,14 +2905,14 @@ function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: En
                   <StatusTag value={enabled ? 'enabled' : 'disabled'} />
                 </Space>
                 <Typography.Text type="secondary">{`${item.type ?? '-'} / ${item.description ?? '-'}`}</Typography.Text>
-                {refs.length > 0 ? <Typography.Text type="warning">{`被 ${refs.length} 台服务器引用`}</Typography.Text> : null}
+                {refs.length > 0 ? <Typography.Text type="warning">{`被 ${refs.length} 个运行资源引用`}</Typography.Text> : null}
               </div>
               <Space>
                 <Button onClick={() => open(item)}>编辑</Button>
                 {enabled && refs.length > 0 ? (
                   <Popconfirm
                     title="禁用凭据"
-                    description={`该凭据被以下服务器引用，禁用后它们的 SSH 连接将失效：${refs.map((server) => String(server.name ?? server.id)).join('、')}`}
+                    description={`该凭据被以下运行资源引用，禁用后它们的连接将失效：${refs.join('、')}`}
                     onConfirm={() => void setEnabled(item, false)}
                   >
                     <Button loading={busyID === item.id}>禁用</Button>
@@ -2832,7 +2924,7 @@ function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: En
                 )}
                 <Popconfirm
                   title="删除凭据"
-                  description={refs.length > 0 ? '凭据仍被服务器引用，请先解除引用。' : '删除后不可恢复。'}
+                  description={refs.length > 0 ? '凭据仍被运行资源引用，请先解除引用。' : '删除后不可恢复。'}
                   disabled={refs.length > 0}
                   onConfirm={() => void deleteCredential(item)}
                 >
@@ -2860,7 +2952,7 @@ function CredentialList({ data, servers, onDone }: { data: Entity[]; servers: En
             <Form.Item name="enabled" valuePropName="checked">
               <Checkbox>启用</Checkbox>
             </Form.Item>
-            <Typography.Text type="secondary">Secret 创建后不可修改；如需更换请删除后重建，并更新引用该凭据的服务器。</Typography.Text>
+            <Typography.Text type="secondary">Secret 创建后不可修改；如需更换请删除后重建，并更新引用该凭据的运行资源。</Typography.Text>
             <div style={{ marginTop: 16 }}>
               <Space>
                 <Button type="primary" loading={busyID === editingID} onClick={() => void submit()}>
@@ -3121,9 +3213,15 @@ function formatServerRef(serverID: Entity[string], state: AppState) {
 }
 
 function targetRefFor(item: Entity, state: AppState) {
-  return item.target_type === 'server_group'
-    ? findByID(state.serverGroups, item.target_ref_id)
-    : findByID(state.servers, item.target_ref_id);
+  if (item.executor_type === 'k8s') {
+    return findByID(state.k8sClusters, scalarRef(nestedValue(item.k8s, 'cluster_id')));
+  }
+  const ssh = nestedObject(item.ssh);
+  const targetType = scalarRef(ssh.target_type ?? item.target_type);
+  const targetRefID = scalarRef(ssh.target_ref_id ?? item.target_ref_id);
+  return targetType === 'server_group'
+    ? findByID(state.serverGroups, targetRefID)
+    : findByID(state.servers, targetRefID);
 }
 
 function namedRef(item: Entity | undefined, fallback: Entity[string], field: string) {
@@ -3135,14 +3233,21 @@ function namedRef(item: Entity | undefined, fallback: Entity[string], field: str
 }
 
 function scalarRef(value: Entity[string]): ScalarValue {
-  return Array.isArray(value) ? value[0] : value;
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  if (value && typeof value === 'object') {
+    return undefined;
+  }
+  return value;
 }
 
 function shortID(value: Entity[string]) {
-  if (!value) {
+  const scalar = scalarRef(value);
+  if (!scalar) {
     return '-';
   }
-  const text = String(value);
+  const text = String(scalar);
   const separator = text.indexOf('_');
   if (separator > 0 && text.length - separator > 10) {
     return `${text.slice(0, separator)}_${text.slice(separator + 1, separator + 7)}`;
@@ -3150,11 +3255,51 @@ function shortID(value: Entity[string]) {
   return text.length > 12 ? `${text.slice(0, 12)}...` : text;
 }
 
+function displayValue(value: Entity[string], fallback = '-'): string {
+  const scalar = scalarRef(value);
+  if (scalar === null || scalar === undefined || scalar === '') {
+    return fallback;
+  }
+  return String(scalar);
+}
+
 function formatTarget(item?: Entity, targetRef?: Entity) {
   if (!item) {
     return '-';
   }
-  return `${item.executor_type ?? '-'} / ${item.target_type ?? '-'} / ${targetRef?.name ?? item.target_ref_id ?? item.id ?? '-'}`;
+  if (item.executor_type === 'k8s') {
+    const k8s = nestedObject(item.k8s);
+    return `k8s / ${displayValue(targetRef?.name ?? k8s.cluster_id)} / ${displayValue(k8s.namespace)} / ${displayValue(k8s.deployment_name)}:${displayValue(k8s.container_name)}`;
+  }
+  const ssh = nestedObject(item.ssh);
+  const targetType = ssh.target_type ?? item.target_type ?? '-';
+  const targetRefID = ssh.target_ref_id ?? item.target_ref_id ?? item.id ?? '-';
+  return `${displayValue(item.executor_type)} / ${displayValue(targetType)} / ${displayValue(targetRef?.name ?? targetRefID)}`;
+}
+
+function nestedObject(value: Entity[string]): NestedEntity {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as NestedEntity : {};
+}
+
+function nestedValue(value: Entity[string], field: string): ScalarValue {
+  const object = nestedObject(value);
+  const raw = object[field];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+function deploymentTargetFormValues(item: Entity): Entity {
+  const ssh = nestedObject(item.ssh);
+  return {
+    ...item,
+    ssh: {
+      target_type: scalarRef(ssh.target_type ?? item.target_type) ?? 'server',
+      target_ref_id: scalarRef(ssh.target_ref_id ?? item.target_ref_id),
+      script_path: scalarRef(ssh.script_path ?? item.script_path),
+      working_dir: scalarRef(ssh.working_dir ?? item.working_dir),
+      env_vars: scalarRef(ssh.env_vars ?? item.env_vars) ?? '{}',
+    },
+    k8s: nestedObject(item.k8s),
+  };
 }
 
 function selectLabel(item: Entity, nameField: string) {

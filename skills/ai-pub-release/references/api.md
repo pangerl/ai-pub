@@ -25,6 +25,13 @@ GET /api/v1/agent/deployment-targets?service_id={service_id}&environment_id={env
 
 `count > 1` 时不要猜测，必须让用户选择。
 
+部署目标候选会返回通用字段和 executor 专属配置：
+
+- `executor_type=ssh`：读取 `ssh.target_type`、`ssh.target_ref_id`、`ssh.script_path`、`ssh.working_dir`、`ssh.env_vars`。
+- `executor_type=k8s`：读取 `k8s.cluster_id`、`k8s.namespace`、`k8s.deployment_name`、`k8s.container_name`。
+
+K8s 目标只用于既有 Kubernetes Deployment 的镜像版本发布；Agent 不得生成或提交 YAML、Manifest、副本数、资源限制、环境变量、探针、volume、label、annotation、Service/Ingress 等运行参数。
+
 ## Preflight
 
 ```text
@@ -43,6 +50,8 @@ POST /api/v1/agent/release-intents/preflight
 ```
 
 `result=block` 时不得创建发布单。`warning` 可以继续，但要向用户展示警告。
+
+K8s 发布要求目标版本的 `artifact_url` 是不可变 OCI digest，例如 `repo/name@sha256:<64位十六进制>`。Deployment 不存在、容器不存在、集群或 kubeconfig 不可用时，preflight 会返回 `block`。
 
 ## 创建发布单
 

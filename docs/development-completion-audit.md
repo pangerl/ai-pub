@@ -1,18 +1,18 @@
 # MVP 完成审查
 
-审查日期：2026-06-26
+审查日期：2026-07-02
 
 ## 结论
 
 本地 MVP 已完成，可作为上线准备基线。运行时只支持 MySQL 8；Docker Compose 从空数据库启动 MySQL、Go 后端、Nginx 前端和一次性验证容器。MySQL 与后端不映射宿主机端口，前端地址为 `http://127.0.0.1:18080/`。
 
-本次审查中 `make verify` 和 `make compose-check` 均已通过；人工测试由项目维护者确认已通过。因此“已完成”仅指下表列出的本地 MVP 闭环；不把尚未纳入本地自动验收的扩展能力算入完成范围。
+本次审查中 `make verify` 和 `make compose-check` 均已通过；人工测试由项目维护者确认已通过。因此“已完成”仅指下表列出的本地 MVP 闭环和 Kubernetes Deployment 版本发布能力；不把尚未纳入本地自动验收的扩展能力算入完成范围。
 
 ## 本次验证
 
 | 命令 | 结果 | 覆盖范围 |
 | --- | --- | --- |
-| `make verify` | 通过 | Go 测试、前端 lint 与生产构建 |
+| `make verify` | 通过 | Go 测试、K8s executor fake client 单测、前端 lint 与生产构建 |
 | `make compose-check` | 通过 | 清空 Compose 数据卷后，从空 MySQL 自动迁移并验证认证后的发布闭环 |
 | 人工测试 | 通过 | 由项目维护者确认 MVP 阶段人工测试已通过 |
 
@@ -28,10 +28,11 @@
 | Web/API 发布闭环 | 已完成 | preflight、确认、队列、Mock/Dry-run、状态聚合、日志、事件、重试与回滚均由 Compose 检查覆盖 |
 | 前端容器与日常操作界面 | 已完成 | Nginx 提供 SPA 和 `/api` 反向代理；发布、配置、系统与个人访问密钥入口已实现 |
 | 通知与 SSH 基础能力 | 已完成 | 企业微信机器人配置/投递记录和 SSH 密钥、密码执行器均已有单元测试与实现 |
+| Kubernetes Deployment 版本发布 | 已完成 | K8s 集群、K8s 部署目标、preflight、client-go patch executor、目标日志、当前版本和前端分支已实现；K8s API 交互由 fake client 单测覆盖 |
 
 ## 专项验证记录
 
-真实非生产 SSH 密码发布和真实企业微信机器人 webhook 曾完成专项验证，详见 `local-verification.md`。这两项依赖外部系统，未包含在 2026-06-22 的离线 Compose 自动验收中；后续修改相关代码时应重新执行对应专项。
+真实非生产 SSH 密码发布和真实企业微信机器人 webhook 曾完成专项验证，详见 `local-verification.md`。这两项依赖外部系统，未包含在 2026-06-22 的离线 Compose 自动验收中；后续修改相关代码时应重新执行对应专项。真实 Kubernetes 集群发布同属外部专项验收，本地仓库验证以 K8s fake client 单测和 Compose 通用发布闭环为准。
 
 ## 不在 MVP 范围
 

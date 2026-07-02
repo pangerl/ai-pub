@@ -1,6 +1,6 @@
 # 本地功能验证
 
-本文档用于验证第一版轻量发布执行闭环。验证范围使用 Docker Compose、MySQL 8、内置 Worker 和 Mock 执行器，不依赖真实服务器或外部通知服务。
+本文档用于验证第一版轻量发布执行闭环。验证范围使用 Docker Compose、MySQL 8、内置 Worker 和 Mock 执行器，不依赖真实服务器、真实 Kubernetes 集群或外部通知服务。K8s executor 的 Kubernetes API 交互使用 Go fake client 单测覆盖。
 
 当前 MVP 已完成，数据库 schema 仍不承诺旧版本升级兼容。调整初始 migration 后，应通过 `make compose-down` 删除现有 Compose 数据卷，再从空库重新启动和验证。
 
@@ -17,6 +17,7 @@ docker compose up --build -d
 执行当前容器化验收入口：
 
 ```bash
+make verify
 make compose-check
 ```
 
@@ -32,6 +33,8 @@ make compose-check
 - 创建并确认失败发布单，验证失败聚合。
 - 创建并确认回滚发布单，验证回滚到上一版本。
 - 检查发布记录、服务器日志和审计事件。
+
+`make verify` 会覆盖 Go 单测、K8s executor fake client 单测、前端 lint 和生产构建。
 
 成功时最后会输出：
 
@@ -57,7 +60,8 @@ docker compose --profile verify up --build --abort-on-container-exit --exit-code
 6. 对失败或部分成功发布单创建重新发布单或回滚单，确认它们都是新发布单并重新走预检与确认。
 7. 在“配置”的环境编辑区检查生产环境管理员确认提示和环境冻结提示，并检查服务器组、部署目标和当前版本视图；在“系统”验证用户、通知和凭据管理。
 8. 在右上角“访问密钥”创建个人访问密钥，确认明文只显示一次，随后可禁用、启用或删除。
-9. 打开或刷新 `/releases`、`/releases/new`、`/releases/{id}`、`/deploys`，确认均能回到相应页面；普通用户访问管理员路径应返回工作台。
+9. 在“系统”创建 `kubeconfig` 凭据，在“配置”创建 K8s 集群和 K8s 部署目标，确认 K8s 分支只显示集群、Namespace、Deployment、容器和超时，不显示服务器、脚本路径、工作目录、环境变量、YAML、Manifest、副本数或运行参数入口。
+10. 打开或刷新 `/releases`、`/releases/new`、`/releases/{id}`、`/deploys`，确认均能回到相应页面；普通用户访问管理员路径应返回工作台。
 
 如需验证 API Key 调用发布接口，可使用创建时返回的一次性明文作为 Bearer token：
 
@@ -89,6 +93,12 @@ AI_PUB_ARTIFACT_URL=harbor.example/team/order-api@sha256:<digest> \
 API Key 读取项目、服务、环境、服务器和部署目标需要 `inventory:read`；读取发布单、事件和回滚候选需要 `release:read`；发布前 preflight 和创建发布单需要 `release:create`。已有发布单 preflight 需要 `release:read` 并会再次写入 `preflight_checked` 事件；确认、驳回、取消发布单需要 `release:confirm`，且 API Key 只能操作自身创建的非生产发布，生产确认必须使用管理员会话。创建回滚单需要 `release:rollback`，读取部署记录和服务器日志需要 `deploy:read`，管理基础配置、API Key、凭据和通知需要 `admin:write`；通过外部接口登记服务版本需要 `version:write`，它只能登记版本，不可创建服务、修改部署目标或执行发布；管理员通过 `PATCH /environments/{id}` 设置环境 `release_frozen`。scope 仅接受已定义枚举，不支持 `*` 或未知值；普通用户不能授予 `admin:write`，更新时只能缩小 scope 集合。用户禁用后不能确认发布；通过 API Key 发起的发布动作事件以 `api_key` 作为 actor 并记录 `api_key_id`；禁用、过期或 scope 不足会被拒绝。
 
 通知链路的本地验证以 `go test ./internal/app ./internal/httpapi ./internal/e2e` 为准，覆盖通知配置创建、启用/禁用、发送记录、生产待管理员确认通知、发布失败通知触发入口、回滚申请通知触发入口，以及通知发送成功/失败写入发布事件流。
+
+## Kubernetes Deployment 发布专项验收
+
+本地自动验证不连接真实 Kubernetes 集群。K8s executor 的本地验证以 `go test ./internal/executor ./internal/app ./internal/httpapi ./internal/repository ./internal/worker` 为准，覆盖 kubeconfig 读取、集群/命名空间/Deployment/容器检查、OCI digest 校验、client-go patch 指定容器 image、rollout 成功/失败/超时，以及不修改副本数、资源、环境变量、探针、volume、label、annotation 等运行配置。
+
+如需做真实非生产 Kubernetes 专项验收，应先创建 `kubeconfig` 凭据、K8s 集群、K8s Deployment 部署目标和带 OCI digest 的服务版本，再执行 preflight、确认发布并检查目标 Deployment 指定容器镜像更新。专项验收不得通过 ai-pub 创建 YAML/Manifest、执行 `kubectl apply`、扩缩容或修改运行参数；回滚应创建指向旧 `ServiceVersion` 的回滚发布单。
 
 ## 真实企业微信机器人专项验收
 
