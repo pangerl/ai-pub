@@ -1335,7 +1335,7 @@ export function App() {
                   {creatingKind === 'environment' ? <EnvironmentForm onDone={(environment) => handleCreated('environment', environment)} /> : null}
                   {creatingKind === 'server' ? <ServerForm servers={state.servers} credentials={state.credentials} onCredentialsChanged={() => void refreshAll()} onDone={(server) => handleCreated('server', server)} /> : null}
                   {creatingKind === 'server-group' ? <ServerGroupForm servers={state.servers} onDone={(group) => handleCreated('server-group', group)} /> : null}
-                  {creatingKind === 'k8s-cluster' ? <K8sClusterForm credentials={state.credentials} onDone={(cluster) => handleCreated('k8s-cluster', cluster)} /> : null}
+                  {creatingKind === 'k8s-cluster' ? <K8sClusterForm credentials={state.credentials} onCredentialsChanged={() => void refreshAll()} onDone={(cluster) => handleCreated('k8s-cluster', cluster)} /> : null}
                   {creatingKind === 'deployment-target' ? (
                     <DeploymentTargetForm
                       services={state.services}
@@ -2397,9 +2397,13 @@ function ServerGroupForm({ servers, onDone }: { servers: Entity[]; onDone: (serv
   );
 }
 
-function K8sClusterForm({ credentials, onDone }: { credentials: Entity[]; onDone: (cluster: Entity) => void }) {
+function K8sClusterForm({ credentials, onCredentialsChanged, onDone }: { credentials: Entity[]; onCredentialsChanged?: () => void; onDone: (cluster: Entity) => void }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [credSelectOpen, setCredSelectOpen] = useState(false);
+  const [credDrawerOpen, setCredDrawerOpen] = useState(false);
+  const [credForm] = Form.useForm();
+  const [credLoading, setCredLoading] = useState(false);
   const kubeconfigCredentials = credentials.filter((item) => item.type === 'kubeconfig' && item.enabled !== false);
   async function submit(values: Entity) {
     setLoading(true);
@@ -2411,14 +2415,59 @@ function K8sClusterForm({ credentials, onDone }: { credentials: Entity[]; onDone
       setLoading(false);
     }
   }
+  async function submitCredential() {
+    let values: Entity;
+    try {
+      values = await credForm.validateFields();
+    } catch {
+      return;
+    }
+    setCredLoading(true);
+    try {
+      const credential = await apiPost<Entity>('/api/v1/credentials', { ...values, type: 'kubeconfig' });
+      onCredentialsChanged?.();
+      form.setFieldValue('credential_ref', credential.id);
+      credForm.resetFields();
+      setCredDrawerOpen(false);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存凭据失败');
+    } finally {
+      setCredLoading(false);
+    }
+  }
   return (
     <Form form={form} layout="vertical" initialValues={{ enabled: true }} onFinish={(values) => void submit(values)}>
       <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
       <Form.Item name="credential_ref" label="Kubeconfig 凭据" rules={[{ required: true }]}>
-        <Select options={kubeconfigCredentials.map(entityOption)} />
+        <Select
+          open={credSelectOpen}
+          onOpenChange={setCredSelectOpen}
+          options={kubeconfigCredentials.map(entityOption)}
+          popupRender={(menu) => (
+            <>
+              {menu}
+              <div className="select-foot-create">
+                <Button size="small" type="link" onClick={() => { setCredSelectOpen(false); setCredDrawerOpen(true); }}>+ 新建凭据</Button>
+              </div>
+            </>
+          )}
+        />
       </Form.Item>
       <Form.Item name="enabled" valuePropName="checked"><Checkbox>启用</Checkbox></Form.Item>
       <Button type="primary" htmlType="submit" loading={loading}>创建 K8s 集群</Button>
+      <Drawer title="新建 Kubeconfig 凭据" open={credDrawerOpen} onClose={() => setCredDrawerOpen(false)} width={360} footer={null} destroyOnClose>
+        <Form form={credForm} layout="vertical">
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item label="类型">
+            <Input value="kubeconfig" disabled />
+          </Form.Item>
+          <Form.Item name="secret" label="Kubeconfig" rules={[{ required: true }]}><Input.TextArea rows={8} /></Form.Item>
+          <Space>
+            <Button type="primary" loading={credLoading} onClick={() => void submitCredential()}>保存凭据</Button>
+            <Button onClick={() => setCredDrawerOpen(false)}>取消</Button>
+          </Space>
+        </Form>
+      </Drawer>
     </Form>
   );
 }
