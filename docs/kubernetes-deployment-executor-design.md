@@ -4,12 +4,14 @@
 
 当前系统已支持 Mock/Dry-run 与 SSH 发布。SSH 发布以服务器或服务器组为运行目标，执行时展开目标服务器，按服务器维度记录日志与当前版本。
 
-新增 Kubernetes 发布能力后，目标服务不再关心具体部署在哪台机器，而是关心某个 Kubernetes 集群、命名空间和 Deployment 的镜像版本。系统仍应保持统一的发布闭环：选择服务版本、创建发布单、执行 preflight、确认入队、Worker 执行、记录日志、更新当前版本、支持重试和回滚。
+新增 Kubernetes 发布能力后，目标服务不再关心具体部署在哪台机器，而是关心某个 Kubernetes 集群、命名空间和既有 Deployment 的镜像版本。系统仍应保持统一的发布闭环：选择服务版本、创建发布单、执行 preflight、确认入队、Worker 执行、记录日志、更新当前版本、支持重试和回滚。
+
+本期明确只做“版本发布”：把已登记的 `ServiceVersion.artifact_url` 更新到既有 Deployment 的指定容器。新服务首次部署、Deployment/Service/Ingress 等资源创建、Kubernetes YAML/Manifest 管理、扩缩容和运行参数调整均不在当前版本范围内。
 
 本设计的目标：
 
 - 支持管理员创建 SSH 或 Kubernetes 两类部署目标，创建表单按执行器走不同分支。
-- 支持 Kubernetes Deployment 镜像发布，语义等价于：
+- 支持 Kubernetes Deployment 镜像发布，语义等价于 `kubectl set image`：
 
 ```bash
 kubectl set image deployment/<Deployment名称> <容器名称>=<新镜像> -n <命名空间>
@@ -18,7 +20,7 @@ kubectl rollout status deployment/<Deployment名称> -n <命名空间> --timeout
 
 - 保持 `ReleaseRequest`、`DeployRecord`、preflight、确认、队列、审计、通知、重试和回滚的业务一致性。
 - 重构执行记录与当前版本模型，避免继续把所有发布目标都强行表达为服务器。
-- 为后续扩展其他 executor 保留清晰接口，但不做当前需求之外的泛化。
+- 保持执行器接口清晰，但不为了未来未知 executor 提前设计通用配置平台。
 
 ## 2. 范围
 
@@ -34,7 +36,7 @@ kubectl rollout status deployment/<Deployment名称> -n <命名空间> --timeout
 - 版本镜像来源：`ServiceVersion.artifact_url`。
 - K8s 发布目标强制 `artifact_type=oci_image`，要求镜像为不可变 digest 引用。
 - preflight 检查集群、凭据、命名空间、Deployment、容器和镜像格式。
-- 执行时更新 Deployment 指定容器镜像并等待 rollout 完成。
+- 执行时只更新 Deployment 指定容器镜像并等待 rollout 完成。
 - 成功后记录服务在该部署目标上的当前版本。
 - 回滚复用现有回滚发布单语义：选择旧 `ServiceVersion` 再执行一次 K8s 发布，不调用 Kubernetes 的历史 revision undo。
 
@@ -45,7 +47,9 @@ kubectl rollout status deployment/<Deployment名称> -n <命名空间> --timeout
 - 不支持按 Pod、Node 或实际调度机器记录版本。
 - 不支持业务 HTTP 健康检查；仅等待 Deployment rollout 完成。
 - 不支持自动推断容器名；创建 Kubernetes 部署目标时必须填写 `container_name`。
-- 不支持在发布系统内管理 Kubernetes manifest。
+- 不支持新服务首次部署，不创建 Deployment、Service、Ingress、ConfigMap、Secret 等 Kubernetes 资源。
+- 不支持在发布系统内管理 Kubernetes YAML/Manifest，不支持 `kubectl apply -f` 模式。
+- 不支持调整运行参数，例如副本数 `replicas`、资源限制、环境变量、探针、调度策略、volume、label、annotation、Service/Ingress 配置等。
 - 不支持复杂 Kubernetes RBAC 编排；系统只校验凭据是否可完成所需读写动作。
 
 ## 3. 产品口径
@@ -55,6 +59,13 @@ kubectl rollout status deployment/<Deployment名称> -n <命名空间> --timeout
 `Service` 仍是业务服务，`ServiceVersion` 仍是可发布版本，`DeploymentTarget` 仍是服务在某环境的发布目标。
 
 Kubernetes 场景下，用户口径可以说“更新某命名空间里的服务”，但技术落点是更新该服务对应的 Kubernetes Deployment 镜像。Kubernetes `Service` 对象只负责流量入口，不承载版本，因此不作为本期发布对象。
+
+ai-pub 的职责是版本发布，不是 Kubernetes 配置管理：
+
+- 版本发布：把一个已登记版本的镜像更新到既有 Deployment 的指定容器，并记录发布单、审计、日志和当前版本。
+- 配置变更：创建新服务、调整副本数、修改资源限制、环境变量、探针、调度、Service/Ingress 等运行配置，交由外部 Kubernetes 配置管理流程处理。
+
+若未来需要发布 YAML、Helm、Kustomize 或 GitOps 变更，应作为单独的 Manifest/GitOps 发布目标重新设计，不混入本期 K8s 镜像发布 executor。
 
 ### 3.2 创建部署目标
 
@@ -104,7 +115,7 @@ K8s 回滚不依赖 Kubernetes revision 历史。系统应创建一个指向旧 
 | `working_dir` | 工作目录 |
 | `env_vars` | JSON 文本 |
 
-存量 SSH/Mock 目标应在迁移中落到此表。Mock 可以继续使用 `target_type` 和 `target_ref_id` 表达测试目标，或保留一个 `mock_deployment_targets` 表；为了减少表数量，本期可让 Mock 复用 SSH 目标配置的目标展开逻辑，但 executor 不执行 SSH。
+存量 SSH 目标应在迁移中落到此表。Mock 是本地和验收 executor，不应绑定 SSH 的脚本、工作目录等语义；实现时可让 Mock 保持最小配置并生成一条 `target_type=mock` 的执行日志。
 
 ### 4.3 Kubernetes 集群
 
@@ -211,21 +222,22 @@ type ExecuteRequest struct {
     Record  domain.DeployRecord
     Target  domain.DeploymentTarget
     Version domain.ServiceVersion
-    Plan    ExecutionPlan
+    Plan    DeployTargetSnapshot
 }
 ```
 
-`ExecutionPlan` 由 repository 在 claim 时根据 `deployment_target_id` 和 executor 专属配置构建并快照。Worker 不应在执行过程中重新猜测目标配置。
+`DeployTargetSnapshot` 由 repository 在确认入队或 claim 时根据 `deployment_target_id` 和 executor 专属配置构建并快照。Worker 不应在执行过程中重新猜测目标配置。
 
-### 5.2 ExecutionPlan
+### 5.2 类型化执行快照
 
-`ExecutionPlan` 建议包含：
+执行快照应使用类型化结构，避免引入 `json.RawMessage` 形式的弱类型配置总线：
 
 ```go
-type ExecutionPlan struct {
+type DeployTargetSnapshot struct {
     ExecutorType string
     Targets      []ExecutionTarget
-    Config       json.RawMessage
+    SSH          *SSHTargetSnapshot
+    K8s          *K8sDeploymentSnapshot
 }
 
 type ExecutionTarget struct {
@@ -233,9 +245,23 @@ type ExecutionTarget struct {
     RefID string
     Name  string
 }
+
+type SSHTargetSnapshot struct {
+    TargetType string
+    ScriptPath string
+    WorkingDir string
+    EnvVars    string
+}
+
+type K8sDeploymentSnapshot struct {
+    ClusterID      string
+    Namespace      string
+    DeploymentName string
+    ContainerName  string
+}
 ```
 
-SSH 的 `Targets` 是展开后的服务器列表。K8s 的 `Targets` 是一个 Deployment 目标。`Config` 保存 executor 专属配置快照，例如 SSH 脚本、K8s 集群和 Deployment 信息。
+SSH 的 `Targets` 是展开后的服务器列表。K8s 的 `Targets` 是一个 Deployment 目标。executor 只读取自己对应的 typed snapshot；不通过通用 JSON 字段解析未来未知配置。
 
 ### 5.3 Worker 执行规则
 
@@ -269,6 +295,8 @@ kubectl rollout status deployment/<deployment_name> -n <namespace> --timeout=<ti
 - kubeconfig、超时、错误分类和 secret 脱敏更可控。
 - 更容易在 Go 单测中用 fake client 覆盖。
 
+本期不采用 `kubectl apply -f deployment.yaml` 语义。`apply` 适合声明式 Manifest 管理，会让 ai-pub 持有或生成完整 Deployment YAML，并可能覆盖副本数、环境变量、资源限制、探针等运行配置；这超出“版本发布”边界。
+
 ### 6.2 镜像更新方式
 
 执行器读取 Deployment：
@@ -277,14 +305,16 @@ kubectl rollout status deployment/<deployment_name> -n <namespace> --timeout=<ti
 apps/v1.Deployment.spec.template.spec.containers[].image
 ```
 
-找到 `container_name` 对应容器后，将其 image 更新为 `ServiceVersion.artifact_url`。若找不到容器，应失败并记录 `container_not_found`。
+找到 `container_name` 对应容器后，只将该容器 image 更新为 `ServiceVersion.artifact_url`。若找不到容器，应失败并记录 `container_not_found`。
 
-更新方式推荐使用 patch，避免覆盖 Deployment 的其他字段。patch 后等待 rollout 完成：
+更新方式推荐使用 patch，避免覆盖 Deployment 的其他字段。patch 内容必须只包含容器镜像变化，不修改 replicas、resources、env、probe、volume、label、annotation 或 rollout strategy。patch 后等待 rollout 完成：
 
 - `observedGeneration >= generation`。
 - `updatedReplicas == spec.replicas`。
 - `availableReplicas == spec.replicas`。
 - Deployment condition `Progressing=True` 且 reason 表示新 ReplicaSet 可用，或达到等价的 rollout complete 判断。
+
+这里读取 `spec.replicas` 仅用于判断 rollout 是否完成，不代表 ai-pub 可以修改副本数。
 
 超时返回 `rollout_timeout`。
 
@@ -337,6 +367,7 @@ apps/v1.Deployment.spec.template.spec.containers[].image
 - Deployment 存在。
 - 指定容器存在。
 - 当前发布镜像与目标镜像相同时给 warning 或 pass；不要因为相同镜像阻断，允许用户重跑 rollout。
+- preflight 不接收也不校验 replicas、resources、env、probe 等运行参数；这些参数不属于本期发布单输入。
 
 ## 8. API 设计
 
@@ -423,7 +454,7 @@ GET /deploy-records/{id}/target-logs
 - 制品类型固定或默认 `oci_image`。
 - 超时时间。
 
-选择 SSH 后展示现有 SSH 字段。不同分支互不展示无关字段，避免让 K8s 用户看到服务器、脚本路径等概念。
+选择 SSH 后展示现有 SSH 字段。不同分支互不展示无关字段，避免让 K8s 用户看到服务器、脚本路径等概念。K8s 表单不得出现 YAML 上传、Manifest 编辑、副本数或运行参数编辑入口。
 
 ### 9.2 发布详情
 
@@ -454,6 +485,8 @@ K8s 详情展示：
 6. 更新 MySQL migration；SQLite migration 仅用于 Go 单测同构 schema。
 
 若仍需要保留历史数据，应单独设计数据迁移脚本，将旧服务器日志迁移为 `deploy_target_logs`，将旧服务器状态迁移为 `deployment_states`。本期不建议为了历史兼容引入长期双写。
+
+实现时应避免把 schema 重构扩大为 Kubernetes 配置平台重构。数据库只表达发布目标、执行日志和当前版本，不保存完整 Deployment YAML。
 
 ## 11. 实施步骤
 
@@ -492,7 +525,8 @@ K8s 详情展示：
 - K8s 目标创建时必须填写 namespace、Deployment 名称和容器名称。
 - 对 K8s 目标创建发布单时，缺少或非法 OCI digest 会被 preflight block。
 - Deployment 或容器不存在时 preflight block。
-- 确认发布后，Worker 能更新 Deployment 指定容器镜像并等待 rollout 完成。
+- 确认发布后，Worker 只更新 Deployment 指定容器镜像并等待 rollout 完成。
+- 发布前后 Deployment 的副本数、资源限制、环境变量、探针、调度、Service/Ingress 等运行配置不应被 ai-pub 修改。
 - 发布成功后，`deployment_states` 记录该部署目标的当前版本。
 - 发布失败时，`deploy_target_logs` 记录错误码、错误信息和有限执行输出。
 - SSH 发布仍保持现有服务器/服务器组语义，顺序 fail-fast 行为不回退。
@@ -505,5 +539,8 @@ K8s 详情展示：
 - 不要让 K8s 发布复用伪服务器；这会污染 UI、冲突检测和当前版本语义。
 - 不要默认更新 Deployment 的所有容器；必须明确 `container_name`。
 - 不要使用 Kubernetes `Service` 对象作为版本承载对象。
+- 不要使用 `kubectl apply -f` 或保存完整 YAML 来实现本期镜像发布。
+- 不要在发布单里加入 replicas、resources、env、probe 等运行参数。
+- 不要把新服务部署、配置变更、扩缩容和版本发布合并为一个流程。
 - 不要绕过发布单直接执行 K8s 更新，否则审计、确认和回滚链路会断裂。
 - 不要在日志中输出 kubeconfig、token 或完整敏感错误上下文。
