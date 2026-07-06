@@ -27,6 +27,10 @@ func TestSQLiteMigrationRunnerAppliesInitialSchema(t *testing.T) {
 
 	assertForeignKeyTarget(t, db, "release_events", "deploy_record_id", "deploy_records")
 	assertForeignKeyTarget(t, db, "deploy_target_logs", "deploy_record_id", "deploy_records")
+	assertForeignKeyTarget(t, db, "release_requests", "deployment_target_id", "deployment_targets")
+	assertForeignKeyTarget(t, db, "ssh_deployment_targets", "deployment_target_id", "deployment_targets")
+	assertForeignKeyTarget(t, db, "k8s_deployment_targets", "deployment_target_id", "deployment_targets")
+	assertForeignKeyTarget(t, db, "deployment_states", "deployment_target_id", "deployment_targets")
 
 	report, err = runner.Run(context.Background(), true)
 	if err != nil {

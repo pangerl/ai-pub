@@ -121,7 +121,7 @@ func healthz(deps Dependencies) http.HandlerFunc {
 		}
 		writeData(w, r, code, map[string]any{
 			"status":     status,
-			"db_dialect": "mysql",
+			"db_dialect": deps.Config.DBDialect,
 			"time":       time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	}

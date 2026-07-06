@@ -9,7 +9,9 @@ type Config struct {
 	AppEnv                 string
 	HTTPAddr               string
 	WebDir                 string
+	DBDialect              string
 	MySQLDSN               string
+	SQLitePath             string
 	AppEncryptionKey       string
 	JWTSecret              string
 	BootstrapAdminUsername string
@@ -24,7 +26,9 @@ func Load() Config {
 		AppEnv:                 env("APP_ENV", "dev"),
 		HTTPAddr:               env("HTTP_ADDR", ":8080"),
 		WebDir:                 env("WEB_DIR", "web/dist"),
+		DBDialect:              env("DB_DIALECT", "mysql"),
 		MySQLDSN:               os.Getenv("MYSQL_DSN"),
+		SQLitePath:             env("SQLITE_PATH", "data/ai-pub.db"),
 		AppEncryptionKey:       os.Getenv("APP_ENCRYPTION_KEY"),
 		JWTSecret:              env("JWT_SECRET", "dev-secret-change-me"),
 		BootstrapAdminUsername: env("BOOTSTRAP_ADMIN_USERNAME", "admin"),
@@ -39,8 +43,20 @@ func (c Config) Validate() error {
 	if c.HTTPAddr == "" {
 		return errors.New("HTTP_ADDR is required")
 	}
-	if c.MySQLDSN == "" {
-		return errors.New("MYSQL_DSN is required")
+	switch c.DBDialect {
+	case "mysql":
+		if c.MySQLDSN == "" {
+			return errors.New("MYSQL_DSN is required")
+		}
+	case "sqlite":
+		if c.SQLitePath == "" {
+			return errors.New("SQLITE_PATH is required")
+		}
+		if c.AppEnv == "prod" {
+			return errors.New("DB_DIALECT=sqlite is only supported for demo/local mode")
+		}
+	default:
+		return errors.New("DB_DIALECT must be mysql or sqlite")
 	}
 	if c.AppEnv == "prod" {
 		if c.AppEncryptionKey == "" {

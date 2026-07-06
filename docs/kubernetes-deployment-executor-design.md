@@ -475,14 +475,14 @@ K8s 详情展示：
 
 ## 10. Migration 与兼容策略
 
-当前项目处于 MVP，且 MySQL 8 是唯一受支持运行时。若确认数据可重建，推荐进行直接 schema 重构：
+当前项目处于 MVP，MySQL 8 是生产和正式集成验收运行时，SQLite 仅用于 demo/local 轻量模式和 Go 单测。若确认数据可重建，推荐进行直接 schema 重构：
 
 1. 新增 `ssh_deployment_targets`、`k8s_clusters`、`k8s_deployment_targets`。
 2. 新增 `deploy_target_logs`、`deployment_states`。
 3. 重构 `deployment_targets` 通用字段。
 4. 将 `deploy_records.total_servers/success_servers/failed_servers/skipped_servers` 改为 target 语义字段。
 5. 删除或停止使用 `server_deploy_logs` 与 `server_deployment_states`。
-6. 更新 MySQL migration；SQLite migration 仅用于 Go 单测同构 schema。
+6. 更新 MySQL migration；同步更新 SQLite migration，保证 demo/local 和 Go 单测 schema 同构。
 
 若仍需要保留历史数据，应单独设计数据迁移脚本，将旧服务器日志迁移为 `deploy_target_logs`，将旧服务器状态迁移为 `deployment_states`。本期不建议为了历史兼容引入长期双写。
 

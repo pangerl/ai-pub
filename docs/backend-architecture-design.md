@@ -272,13 +272,15 @@ K8s executor 额外使用：
 - kubeconfig 使用加密凭据存储。
 - 日志和错误不得输出 kubeconfig、token 或完整敏感错误上下文。
 
-## 12. MySQL 与 PostgreSQL 扩展边界
+## 12. 数据库运行边界
 
 - 使用 `database/sql`。
 - 业务 SQL 集中在 repository；MySQL 专属 SQL 只出现在 repository 或 migration。
 - JSON 数据按文本保存，由应用层解析。
 - 布尔值按 `0/1` 保存。
 - 时间由应用层生成。
+- MySQL 8 是生产和正式集成验收数据库。
+- SQLite 仅用于 demo/local 轻量模式，不用于生产，不承诺多实例或高并发语义。
 - PostgreSQL 是后续开源扩展，不在当前运行时配置或测试矩阵中维护；接入时新增 `migrations/postgres` 和 repository 适配。
 - 当前不做高并发或多实例专项设计。
 
@@ -290,7 +292,9 @@ K8s executor 额外使用：
 |------|------|
 | `APP_ENV` | `dev` / `test` / `prod` |
 | `HTTP_ADDR` | 监听地址 |
+| `DB_DIALECT` | `mysql` / `sqlite`，默认 `mysql`；`sqlite` 仅限 demo/local |
 | `MYSQL_DSN` | MySQL DSN |
+| `SQLITE_PATH` | SQLite demo/local 数据文件路径 |
 | `APP_ENCRYPTION_KEY` | 凭据和 webhook 加密 key，生产必填 |
 | `JWT_SECRET` | 登录 token key，生产必填 |
 | `BOOTSTRAP_ADMIN_USERNAME` | 首个管理员用户名 |

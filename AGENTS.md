@@ -9,9 +9,10 @@
 
 ## 运行时与验证
 
-- MySQL 8 是唯一受支持的运行时数据库；Docker Compose 是标准的本地集成环境。
+- MySQL 8 是生产和正式集成验收数据库；SQLite 仅用于 demo/local 轻量模式，不得用于生产。Docker Compose 是标准的本地集成环境。
 - `make verify` 是代码级检查：运行 Go 测试、前端 lint 和生产构建。
 - `make compose-check` 是集成验收检查：重新构建容器，从空 MySQL 数据库启动，并端到端验证发布流程。
+- `make compose-check-sqlite` 是 SQLite demo/local 轻量验收，不替代 MySQL 正式验收。
 - 如需清理后重新执行失败的 Compose 验证，使用 `make compose-down`；它会删除验证 profile 的资源和数据卷。
 
 ## 控制 token 与输出的验证方式

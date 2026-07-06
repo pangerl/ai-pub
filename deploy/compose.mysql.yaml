@@ -16,7 +16,7 @@ services:
 
   app:
     build:
-      context: .
+      context: ..
       target: app
     environment:
       APP_ENV: dev
@@ -36,7 +36,7 @@ services:
   verify:
     profiles: [verify]
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile.verify
     environment:
       BASE_URL: http://app:8080

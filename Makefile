@@ -1,6 +1,6 @@
 GOCACHE ?= $(CURDIR)/.cache/go-build
 
-.PHONY: test web-check verify compose-up compose-down compose-check local-check
+.PHONY: test web-check verify compose-up compose-down compose-check compose-sqlite-up compose-sqlite-down compose-check-sqlite local-check
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...
@@ -18,6 +18,16 @@ compose-down:
 
 compose-check:
 	docker compose --profile verify down -v --remove-orphans
-	docker compose --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+	APP_PORT=0 docker compose --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+
+compose-sqlite-up:
+	docker compose -f deploy/compose.sqlite.yaml up --build -d
+
+compose-sqlite-down:
+	docker compose -f deploy/compose.sqlite.yaml --profile verify down -v --remove-orphans
+
+compose-check-sqlite:
+	docker compose -f deploy/compose.sqlite.yaml --profile verify down -v --remove-orphans
+	APP_PORT=0 docker compose -f deploy/compose.sqlite.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 
 local-check: compose-check

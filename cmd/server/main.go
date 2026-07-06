@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/mattn/go-sqlite3"
 
 	"ai-pub/internal/app"
 	"ai-pub/internal/auth"
@@ -48,7 +50,7 @@ func run() error {
 	defer db.Close()
 
 	if cfg.MigrationCheckOnly {
-		runner := migration.NewRunner(db, "mysql", os.DirFS("."))
+		runner := migration.NewRunner(db, cfg.DBDialect, os.DirFS("."))
 		report, err := runner.Run(context.Background(), true)
 		if err != nil {
 			return err
@@ -57,7 +59,7 @@ func run() error {
 		return nil
 	}
 	if cfg.MigrationAuto {
-		runner := migration.NewRunner(db, "mysql", os.DirFS("."))
+		runner := migration.NewRunner(db, cfg.DBDialect, os.DirFS("."))
 		report, err := runner.Run(context.Background(), false)
 		if err != nil {
 			return err
@@ -143,6 +145,9 @@ func ensureBootstrapAdmin(ctx context.Context, store repository.Store, cfg confi
 }
 
 func openDB(cfg config.Config) (*sql.DB, error) {
+	if cfg.DBDialect == "sqlite" {
+		return openSQLite(cfg.SQLitePath)
+	}
 	db, err := sql.Open("mysql", cfg.MySQLDSN)
 	if err != nil {
 		return nil, fmt.Errorf("open mysql: %w", err)
@@ -150,6 +155,45 @@ func openDB(cfg config.Config) (*sql.DB, error) {
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("ping mysql: %w", err)
+	}
+	return db, nil
+}
+
+func openSQLite(path string) (*sql.DB, error) {
+	if path != ":memory:" {
+		dir := filepath.Dir(path)
+		if dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("create sqlite directory: %w", err)
+			}
+		}
+	}
+	dsn := path
+	if path != ":memory:" {
+		dsn += "?_foreign_keys=on&_busy_timeout=5000"
+	}
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ping sqlite: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set sqlite busy timeout: %w", err)
+	}
+	if path != ":memory:" {
+		if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("enable sqlite wal: %w", err)
+		}
 	}
 	return db, nil
 }

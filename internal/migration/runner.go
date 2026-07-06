@@ -109,7 +109,26 @@ func (r Runner) isApplied(ctx context.Context, item migrationFile) (bool, error)
 }
 
 func (r Runner) apply(ctx context.Context, item migrationFile) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if r.dialect == "sqlite" {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("disable sqlite foreign keys: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = ON`); err != nil {
+			return fmt.Errorf("enable sqlite legacy alter table: %w", err)
+		}
+		defer func() {
+			_, _ = conn.ExecContext(context.Background(), `PRAGMA legacy_alter_table = OFF`)
+			_, _ = conn.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`)
+		}()
+	}
+
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

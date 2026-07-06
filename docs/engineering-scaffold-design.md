@@ -38,7 +38,12 @@
 │   └── worker/
 ├── migrations/
 │   ├── mysql/
-│   └── sqlite/        # 仅用于 Go 单测内存 schema，不是运行时
+│   └── sqlite/        # demo/local 轻量模式与 Go 单测 schema
+├── deploy/
+│   ├── compose.mysql.yaml
+│   ├── compose.sqlite.yaml
+│   ├── scripts/
+│   └── sql/
 ├── compose.yaml
 ├── Dockerfile
 ├── web/
@@ -73,7 +78,9 @@
 |------|--------|------|
 | `APP_ENV` | `dev` | 运行环境 |
 | `HTTP_ADDR` | `:8080` | 后端监听地址 |
+| `DB_DIALECT` | `mysql` | `mysql` / `sqlite`；`sqlite` 仅用于 demo/local |
 | `MYSQL_DSN` | 空 | MySQL DSN |
+| `SQLITE_PATH` | `data/ai-pub.db` | SQLite demo/local 数据文件路径 |
 | `APP_ENCRYPTION_KEY` | 空 | 凭据加密 key，生产必填 |
 | `JWT_SECRET` | dev 默认值 | JWT key，生产必填 |
 | `BOOTSTRAP_ADMIN_USERNAME` | `admin` | 首个管理员用户名 |

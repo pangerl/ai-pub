@@ -14,7 +14,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY migrations ./migrations
-RUN CGO_ENABLED=0 go build -o /out/ai-pub ./cmd/server
+RUN CGO_ENABLED=1 go build -o /out/ai-pub ./cmd/server
 
 FROM debian:bookworm-slim AS app
 

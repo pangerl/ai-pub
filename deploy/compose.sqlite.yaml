@@ -1,42 +1,26 @@
 services:
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_DATABASE: ai_pub
-      MYSQL_USER: ai_pub
-      MYSQL_PASSWORD: ai_pub
-      MYSQL_ROOT_PASSWORD: root
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot"]
-      interval: 2s
-      timeout: 5s
-      retries: 30
-
   app:
     build:
-      context: .
+      context: ..
       target: app
     environment:
       APP_ENV: dev
       HTTP_ADDR: :8080
-      DB_DIALECT: mysql
-      MYSQL_DSN: ai_pub:ai_pub@tcp(mysql:3306)/ai_pub?parseTime=true&charset=utf8mb4&loc=UTC
+      DB_DIALECT: sqlite
+      SQLITE_PATH: /data/ai-pub.db
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-dev-encryption-key}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ai-pub-dev-admin}
-    depends_on:
-      mysql:
-        condition: service_healthy
+    volumes:
+      - sqlite_data:/data
     ports:
       - "127.0.0.1:${APP_PORT:-18080}:8080"
 
   verify:
     profiles: [verify]
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile.verify
     environment:
       BASE_URL: http://app:8080
@@ -60,4 +44,4 @@ services:
         condition: service_started
 
 volumes:
-  mysql_data:
+  sqlite_data:

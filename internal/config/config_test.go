@@ -2,10 +2,12 @@ package config
 
 import "testing"
 
-func TestMySQLDSNIsRequired(t *testing.T) {
+func TestDatabaseConfigByDialect(t *testing.T) {
 	t.Setenv("APP_ENV", "")
 	t.Setenv("HTTP_ADDR", "")
+	t.Setenv("DB_DIALECT", "")
 	t.Setenv("MYSQL_DSN", "")
+	t.Setenv("SQLITE_PATH", "")
 
 	cfg := Load()
 	if err := cfg.Validate(); err == nil {
@@ -15,6 +17,18 @@ func TestMySQLDSNIsRequired(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "ai_pub:ai_pub@tcp(mysql:3306)/ai_pub?parseTime=true")
 	if err := Load().Validate(); err != nil {
 		t.Fatalf("expected MySQL config to be valid: %v", err)
+	}
+
+	t.Setenv("DB_DIALECT", "sqlite")
+	t.Setenv("SQLITE_PATH", "data/demo.db")
+	t.Setenv("MYSQL_DSN", "")
+	if err := Load().Validate(); err != nil {
+		t.Fatalf("expected SQLite demo config to be valid: %v", err)
+	}
+
+	t.Setenv("APP_ENV", "prod")
+	if err := Load().Validate(); err == nil {
+		t.Fatal("expected SQLite to be rejected in prod")
 	}
 }
 

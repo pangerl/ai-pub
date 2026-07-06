@@ -1,6 +1,8 @@
 # 本地功能验证
 
-本文档用于验证第一版轻量发布执行闭环。验证范围使用 Docker Compose、MySQL 8、内置 Worker 和 Mock 执行器，不依赖真实服务器、真实 Kubernetes 集群或外部通知服务。K8s executor 的 Kubernetes API 交互使用 Go fake client 单测覆盖。
+本文档用于验证第一版轻量发布执行闭环。正式集成验收使用 Docker Compose、MySQL 8、内置 Worker 和 Mock 执行器，不依赖真实服务器、真实 Kubernetes 集群或外部通知服务。K8s executor 的 Kubernetes API 交互使用 Go fake client 单测覆盖。
+
+SQLite 仅作为 demo/local 轻量模式，用于不启动 MySQL 的快速演示和本地验证。生产环境不得使用 SQLite；开源用户如不选择 MySQL，PostgreSQL 是后续扩展方向。
 
 当前 MVP 已完成，数据库 schema 仍不承诺旧版本升级兼容。调整初始 migration 后，应通过 `make compose-down` 删除现有 Compose 数据卷，再从空库重新启动和验证。
 
@@ -12,6 +14,19 @@ docker compose up --build -d
 
 访问应用：`http://127.0.0.1:18080/`。Compose 会启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。MySQL 仅在 Compose 网络中暴露，不占用宿主机数据库端口。
 
+部署相关 YAML 集中在 `deploy/` 目录。需要显式选择部署模式时：
+
+```bash
+docker compose -f deploy/compose.mysql.yaml up --build -d
+docker compose -f deploy/compose.sqlite.yaml up --build -d
+```
+
+也可使用轻量 SQLite demo/local 启动命令：
+
+```bash
+make compose-sqlite-up
+```
+
 ## 自动验证
 
 执行当前容器化验收入口：
@@ -19,6 +34,12 @@ docker compose up --build -d
 ```bash
 make verify
 make compose-check
+```
+
+SQLite demo/local 模式可执行快速容器验收：
+
+```bash
+make compose-check-sqlite
 ```
 
 脚本会自动完成：

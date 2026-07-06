@@ -1227,7 +1227,7 @@ PostgreSQL 后续接入要求：
 
 - migration 只能向前追加，不修改已发布 migration。
 - 每个 migration 必须有版本号、up 脚本和必要时的 down 脚本。
-- 当前只维护 `migrations/mysql`。
+- 当前维护 `migrations/mysql` 和 demo/local 用 `migrations/sqlite`；MySQL 8 是生产和正式集成验收数据库。
 - 每次库表变更必须考虑旧数据兼容和历史审计数据保护。
 - 发布单、发布记录、审计事件等历史表不得做危险级联删除。
 - 删除字段应分阶段：先停止读写，再后续版本删除。
@@ -1240,6 +1240,9 @@ migrations/
   mysql/
     000001_init.up.sql
     000001_init.down.sql
+  sqlite/
+    000001_init.up.sql
+    000001_init.down.sql
 ```
 
 ### 13.7 容器化自动迁移
@@ -1250,7 +1253,8 @@ migrations/
 
 ```text
 容器启动
-  -> 读取 MYSQL_DSN
+  -> 读取 DB_DIALECT
+  -> 按 mysql/sqlite 读取对应连接配置
   -> 获取迁移锁
   -> 检查 schema_migrations
   -> 校验 migration checksum

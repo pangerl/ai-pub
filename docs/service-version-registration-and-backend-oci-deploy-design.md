@@ -276,7 +276,7 @@ register_release_version:
 
 ## 8. 实施顺序与验收
 
-1. Migration：为 MySQL 运行时增加 `deployment_targets.artifact_type NOT NULL DEFAULT 'version_only'`、服务版本登记幂等字段和 `service_version_events`；同时更新 `migrations/sqlite/` 的同构测试 schema。SQLite 仅用于当前 Go 单测的内存数据库，不构成受支持运行时。
+1. Migration：为 MySQL 运行时增加 `deployment_targets.artifact_type NOT NULL DEFAULT 'version_only'`、服务版本登记幂等字段和 `service_version_events`；同时更新 `migrations/sqlite/` 的同构 schema。SQLite 仅用于 demo/local 轻量模式和 Go 单测，不用于生产。
 2. 后端：新增 `version:write` scope，实现通用版本登记接口、服务端来源写入、字段校验、幂等与冲突处理，并写入 `service_version_events`。
 3. 前端：版本列表按服务筛选、搜索与长版本展示；保留手动登记入口，并展示部署目标制品类型。
 4. 服务器：部署专用 `deploy-backend-image.sh` 和受保护环境文件，OCI 部署目标设为 `artifact_type=oci_image` 并配置静态 `env_vars`。

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -438,6 +439,20 @@ func TestReleaseListPagination(t *testing.T) {
 	router := NewRouter(Dependencies{DB: db, Config: config.Config{}})
 	store := repository.NewStore(db)
 	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.Exec(`
+INSERT INTO projects (id, name, slug, description, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO services (id, project_id, name, slug, description, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO service_versions (id, service_id, version, source, created_at) VALUES (?, ?, ?, ?, ?);
+INSERT INTO environments (id, name, slug, is_production, release_frozen, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO deployment_targets (id, service_id, environment_id, executor_type, artifact_type, timeout_seconds, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, "proj-paging", "Paging", "paging", "", 1, now, now,
+		"svc-paging", "proj-paging", "Paging Service", "paging-service", "", 1, now, now,
+		"ver-paging", "svc-paging", "v1", "manual", now,
+		"env-paging", "Test", "test", 0, 0, now, now,
+		"tgt-paging", "svc-paging", "env-paging", "mock", "version_only", 300, 1, now, now); err != nil {
+		t.Fatal(err)
+	}
 
 	// 直接经 store 插入 55 条发布单，避免重复整套 API key 预置流程。
 	for i := 0; i < 55; i++ {
@@ -446,16 +461,17 @@ func TestReleaseListPagination(t *testing.T) {
 			status = "success"
 		}
 		if _, err := store.CreateReleaseRequest(ctx, domain.ReleaseRequest{
-			ServiceID:           "svc-paging",
-			EnvironmentID:       "env-paging",
-			ServiceVersionID:    "ver-paging",
-			DeploymentTargetID:  "tgt-paging",
-			Status:              status,
-			Source:              "web",
-			CreatedByType:       "user",
-			CreatedByID:         "usr-paging",
-			SummaryStatus:       "ok",
-			IdempotencyKey:      "paging-" + strconv.Itoa(i),
+			ProjectID:          "proj-paging",
+			ServiceID:          "svc-paging",
+			EnvironmentID:      "env-paging",
+			ServiceVersionID:   "ver-paging",
+			DeploymentTargetID: "tgt-paging",
+			Status:             status,
+			Source:             "web",
+			CreatedByType:      "user",
+			CreatedByID:        "usr-paging",
+			SummaryStatus:      "ok",
+			IdempotencyKey:     "paging-" + strconv.Itoa(i),
 		}); err != nil {
 			t.Fatalf("create release %d: %v", i, err)
 		}
