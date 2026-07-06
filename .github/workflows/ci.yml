@@ -102,8 +102,7 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
-      API_IMAGE_NAME: ai-pub-api
-      WEB_IMAGE_NAME: ai-pub-web
+      IMAGE_NAME: ai-pub
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,30 +131,19 @@ jobs:
             IMAGE_TAG="$(date +%Y%m%d)-${GITHUB_SHA::7}"
           fi
 
-          API_IMAGE="docker.io/${DOCKERHUB_NAMESPACE}/${API_IMAGE_NAME}"
-          WEB_IMAGE="docker.io/${DOCKERHUB_NAMESPACE}/${WEB_IMAGE_NAME}"
+          IMAGE="docker.io/${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}"
 
           {
             echo "IMAGE_TAG=${IMAGE_TAG}"
-            echo "API_IMAGE=${API_IMAGE}"
-            echo "WEB_IMAGE=${WEB_IMAGE}"
+            echo "IMAGE=${IMAGE}"
           } >> "${GITHUB_ENV}"
 
-      - name: Build and push API image
+      - name: Build and push app image
         run: |
           set -euo pipefail
           docker buildx build \
             --push \
-            --target api \
-            -t "${API_IMAGE}:${IMAGE_TAG}" \
-            -t "${API_IMAGE}:latest" \
+            --target app \
+            -t "${IMAGE}:${IMAGE_TAG}" \
+            -t "${IMAGE}:latest" \
             .
-
-      - name: Build and push web image
-        run: |
-          set -euo pipefail
-          docker buildx build \
-            --push \
-            -t "${WEB_IMAGE}:${IMAGE_TAG}" \
-            -t "${WEB_IMAGE}:latest" \
-            web

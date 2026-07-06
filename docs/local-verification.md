@@ -10,7 +10,7 @@
 docker compose up --build -d
 ```
 
-访问前端：`http://127.0.0.1:18080/`。MySQL 和后端仅在 Compose 网络中暴露，不占用宿主机数据库或后端端口。
+访问应用：`http://127.0.0.1:18080/`。Compose 会启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。MySQL 仅在 Compose 网络中暴露，不占用宿主机数据库端口。
 
 ## 自动验证
 
@@ -86,7 +86,7 @@ AI_PUB_ARTIFACT_URL=harbor.example/team/order-api@sha256:<digest> \
 ./scripts/register-version.sh
 ```
 
-脚本默认 `AI_PUB_BASE_URL=http://127.0.0.1:18080`，经 `web` 反代 `/api/` 到容器内 `api:8080`；`api` 容器不直接映射端口。`project_key`、`service_key`、`version` 必填，服务须由管理员预先创建，接口不接收 `service_id` 也不自动创建实体。登记接口不校验 `artifact_url` 格式，OCI digest 校验发生在创建发布单时的 preflight。
+脚本默认 `AI_PUB_BASE_URL=http://127.0.0.1:18080`，请求单应用容器提供的 `/api/v1/version-registrations`。`project_key`、`service_key`、`version` 必填，服务须由管理员预先创建，接口不接收 `service_id` 也不自动创建实体。登记接口不校验 `artifact_url` 格式，OCI digest 校验发生在创建发布单时的 preflight。
 
 验证幂等与冲突：固定 `AI_PUB_IDEMPOTENCY_KEY=local:foo` 连跑两次，第二次返回 `200` 且版本与首次一致；同幂等键改 `AI_PUB_VERSION` 或 `AI_PUB_ARTIFACT_URL` 返回 `409 idempotency_conflict`；换幂等键但用同一版本号加不同 commit/制品返回 `409 version_conflict`。首次登记返回 `201`，非 2xx 时脚本输出 `error.code`、`error.message` 与 `request_id` 并以非零退出。
 

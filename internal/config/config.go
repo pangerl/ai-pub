@@ -8,6 +8,7 @@ import (
 type Config struct {
 	AppEnv                 string
 	HTTPAddr               string
+	WebDir                 string
 	MySQLDSN               string
 	AppEncryptionKey       string
 	JWTSecret              string
@@ -22,6 +23,7 @@ func Load() Config {
 	return Config{
 		AppEnv:                 env("APP_ENV", "dev"),
 		HTTPAddr:               env("HTTP_ADDR", ":8080"),
+		WebDir:                 env("WEB_DIR", "web/dist"),
 		MySQLDSN:               os.Getenv("MYSQL_DSN"),
 		AppEncryptionKey:       os.Getenv("APP_ENCRYPTION_KEY"),
 		JWTSecret:              env("JWT_SECRET", "dev-secret-change-me"),

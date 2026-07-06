@@ -10,12 +10,11 @@
 #   AI_PUB_COMMIT_SHA=<可选 commit> \
 #   AI_PUB_ARTIFACT_URL=<可选制品引用，OCI 需 digest> \
 #   AI_PUB_IDEMPOTENCY_KEY=<可选，默认 local:<时间戳>> \
-#   AI_PUB_BASE_URL=<可选，默认 http://127.0.0.1:8080> \
+#   AI_PUB_BASE_URL=<可选，默认 http://127.0.0.1:18080> \
 #   ./scripts/register-version.sh
 set -euo pipefail
 
-# 本地 compose 默认仅 web 暴露 127.0.0.1:18080 并反代 /api -> api:8080，
-# api 容器不直接映射端口；故调试默认走 18080，与 docs/local-verification.md 一致。
+# 本地 compose 默认将单应用容器暴露到 127.0.0.1:18080，与 docs/local-verification.md 一致。
 BASE_URL="${AI_PUB_BASE_URL:-http://127.0.0.1:18080}"
 ENDPOINT="${BASE_URL}/api/v1/version-registrations"
 

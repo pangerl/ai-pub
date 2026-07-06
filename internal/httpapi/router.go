@@ -105,6 +105,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /api/v1/agent/release-requests", agentCreateRelease(releases, store))
 	mux.HandleFunc("POST /api/v1/agent/release-requests/{id}/confirm", agentConfirmRelease(releases, store))
 	mux.HandleFunc("GET /api/v1/agent/release-requests/{id}/summary", agentReleaseSummary(releases, store))
+	if deps.Config.WebDir != "" {
+		mux.Handle("GET /", spa(deps.Config.WebDir))
+	}
 	return requestID(requireSessionOrAPIKey(store, deps.Config.JWTSecret, mux))
 }
 

@@ -110,7 +110,7 @@ migrations/
 docker compose up --build -d
 ```
 
-MySQL 与后端仅在 Compose 网络中运行，前端访问地址为 `http://127.0.0.1:18080/`。
+Compose 启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。应用访问地址为 `http://127.0.0.1:18080/`，MySQL 仅在 Compose 网络中运行。
 
 ## 9. 测试命令
 
@@ -173,6 +173,7 @@ make compose-check
   -> 检查 migration
   -> 执行 safe migration
   -> 启动 API
+  -> 提供 SPA 静态资源
   -> 启动内置 Worker
 ```
 
