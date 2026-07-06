@@ -4,16 +4,25 @@
 
 ## 选择部署 YAML
 
-- `compose.mysql.yaml`：正式部署和完整集成验收使用，启动 MySQL 8 与 `app` 容器。
-- `compose.sqlite.yaml`：demo/local 轻量模式使用，只启动 `app` 容器，SQLite 数据文件保存在卷中。
+- `compose.mysql.yaml`：镜像版 MySQL 正式本地环境使用，启动 MySQL 8 与 `app` 容器。
+- `compose.sqlite.yaml`：镜像版 demo/local 轻量模式使用，只启动 `app` 容器，SQLite 数据文件保存在卷中。
+- `compose.local-build.yaml`：开发者本地源码构建与验收 override，供 Makefile 叠加使用。
 
 SQLite 模式仅用于演示和本地快速验证，不用于生产。开源用户如不选择 MySQL，后续应走 PostgreSQL 支持路径；PostgreSQL 不在当前运行时矩阵内。
+镜像版 MySQL 和 SQLite 默认使用 `hxjagf/ai-pub:latest`；如需验证指定镜像，可设置 `AI_PUB_IMAGE`。
 
-常用命令：
+镜像版启动：
 
 ```bash
-docker compose -f deploy/compose.mysql.yaml up --build -d
-docker compose -f deploy/compose.sqlite.yaml up --build -d
+docker compose -f deploy/compose.mysql.yaml up -d
+docker compose -f deploy/compose.sqlite.yaml up -d
+```
+
+开发者源码构建：
+
+```bash
+make compose-up
+make compose-sqlite-up
 ```
 
 ## 目录边界

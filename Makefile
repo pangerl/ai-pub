@@ -1,4 +1,6 @@
 GOCACHE ?= $(CURDIR)/.cache/go-build
+MYSQL_COMPOSE_FILES = -f deploy/compose.mysql.yaml -f deploy/compose.local-build.yaml
+SQLITE_COMPOSE_FILES = -f deploy/compose.sqlite.yaml -f deploy/compose.local-build.yaml
 
 .PHONY: test web-check verify compose-up compose-down compose-check compose-sqlite-up compose-sqlite-down compose-check-sqlite local-check
 
@@ -11,23 +13,23 @@ web-check:
 verify: test web-check
 
 compose-up:
-	docker compose -f deploy/compose.mysql.yaml up --build -d
+	docker compose $(MYSQL_COMPOSE_FILES) up --build -d
 
 compose-down:
-	docker compose -f deploy/compose.mysql.yaml --profile verify down -v --remove-orphans
+	docker compose $(MYSQL_COMPOSE_FILES) --profile verify down -v --remove-orphans
 
 compose-check:
-	docker compose -f deploy/compose.mysql.yaml --profile verify down -v --remove-orphans
-	APP_PORT=0 docker compose -f deploy/compose.mysql.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+	docker compose $(MYSQL_COMPOSE_FILES) --profile verify down -v --remove-orphans
+	APP_PORT=0 docker compose $(MYSQL_COMPOSE_FILES) --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 
 compose-sqlite-up:
-	docker compose -f deploy/compose.sqlite.yaml up --build -d
+	docker compose $(SQLITE_COMPOSE_FILES) up --build -d
 
 compose-sqlite-down:
-	docker compose -f deploy/compose.sqlite.yaml --profile verify down -v --remove-orphans
+	docker compose $(SQLITE_COMPOSE_FILES) --profile verify down -v --remove-orphans
 
 compose-check-sqlite:
-	docker compose -f deploy/compose.sqlite.yaml --profile verify down -v --remove-orphans
-	APP_PORT=0 docker compose -f deploy/compose.sqlite.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+	docker compose $(SQLITE_COMPOSE_FILES) --profile verify down -v --remove-orphans
+	APP_PORT=0 docker compose $(SQLITE_COMPOSE_FILES) --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 
 local-check: compose-check

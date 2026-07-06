@@ -12,16 +12,18 @@ SQLite 仅作为 demo/local 轻量模式，用于不启动 MySQL 的快速演示
 make compose-up
 ```
 
-访问应用：`http://127.0.0.1:18080/`。Compose 会启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。MySQL 仅在 Compose 网络中暴露，不占用宿主机数据库端口。
+访问应用：`http://127.0.0.1:18080/`。Makefile 会叠加 `deploy/compose.local-build.yaml`，基于当前源码构建 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。MySQL 仅在 Compose 网络中暴露，不占用宿主机数据库端口。
 
 部署相关 YAML 集中在 `deploy/` 目录。需要显式选择部署模式时：
 
 ```bash
-docker compose -f deploy/compose.mysql.yaml up --build -d
-docker compose -f deploy/compose.sqlite.yaml up --build -d
+docker compose -f deploy/compose.mysql.yaml up -d
+docker compose -f deploy/compose.sqlite.yaml up -d
 ```
 
-也可使用轻量 SQLite demo/local 启动命令：
+其中 `deploy/compose.mysql.yaml` 和 `deploy/compose.sqlite.yaml` 默认使用 `AI_PUB_IMAGE` 指定的镜像，未设置时使用 `hxjagf/ai-pub:latest`。
+
+开发者如需基于当前源码构建 SQLite demo/local 环境，使用 Makefile 命令；它会叠加 `deploy/compose.local-build.yaml`：
 
 ```bash
 make compose-sqlite-up
@@ -66,7 +68,7 @@ make compose-check-sqlite
 `make local-check` 是保留的兼容别名。可选直接执行 Compose 验收容器：
 
 ```bash
-APP_PORT=0 docker compose -f deploy/compose.mysql.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+APP_PORT=0 docker compose -f deploy/compose.mysql.yaml -f deploy/compose.local-build.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 ```
 
 ## 前端人工验证
