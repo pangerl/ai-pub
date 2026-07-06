@@ -44,7 +44,6 @@
 │   ├── compose.sqlite.yaml
 │   ├── scripts/
 │   └── sql/
-├── compose.yaml
 ├── Dockerfile
 ├── web/
 │   ├── src/
@@ -103,8 +102,8 @@ migrations/
 
 要求：
 
-- MySQL migration 是唯一运行时 migration。
-- SQLite migration 仅服务 Go 单测内存数据库，用于保持核心 schema 同构，不作为运行时承诺。
+- MySQL migration 是生产和正式集成验收 migration。
+- SQLite migration 服务 demo/local 轻量模式和 Go 单测，用于保持核心 schema 同构，不用于生产。
 - PostgreSQL 接入时新增独立目录。
 - 已发布 migration 不修改。
 - 记录 checksum。
@@ -114,10 +113,15 @@ migrations/
 ## 8. 启动命令
 
 ```bash
-docker compose up --build -d
+make compose-up
 ```
 
 Compose 启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。应用访问地址为 `http://127.0.0.1:18080/`，MySQL 仅在 Compose 网络中运行。
+
+部署 YAML 集中在 `deploy/`：
+
+- `deploy/compose.mysql.yaml`：MySQL 正式本地环境和完整验收。
+- `deploy/compose.sqlite.yaml`：SQLite demo/local 轻量模式。
 
 ## 9. 测试命令
 

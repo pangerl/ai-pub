@@ -9,7 +9,7 @@ SQLite 仅作为 demo/local 轻量模式，用于不启动 MySQL 的快速演示
 ## 启动服务
 
 ```bash
-docker compose up --build -d
+make compose-up
 ```
 
 访问应用：`http://127.0.0.1:18080/`。Compose 会启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。MySQL 仅在 Compose 网络中暴露，不占用宿主机数据库端口。
@@ -66,7 +66,7 @@ make compose-check-sqlite
 `make local-check` 是保留的兼容别名。可选直接执行 Compose 验收容器：
 
 ```bash
-docker compose --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+APP_PORT=0 docker compose -f deploy/compose.mysql.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 ```
 
 ## 前端人工验证

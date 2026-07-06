@@ -11,14 +11,14 @@ web-check:
 verify: test web-check
 
 compose-up:
-	docker compose up --build -d
+	docker compose -f deploy/compose.mysql.yaml up --build -d
 
 compose-down:
-	docker compose --profile verify down -v --remove-orphans
+	docker compose -f deploy/compose.mysql.yaml --profile verify down -v --remove-orphans
 
 compose-check:
-	docker compose --profile verify down -v --remove-orphans
-	APP_PORT=0 docker compose --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
+	docker compose -f deploy/compose.mysql.yaml --profile verify down -v --remove-orphans
+	APP_PORT=0 docker compose -f deploy/compose.mysql.yaml --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 
 compose-sqlite-up:
 	docker compose -f deploy/compose.sqlite.yaml up --build -d
