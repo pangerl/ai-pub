@@ -6,6 +6,7 @@ web/dist/
 web/node_modules/
 web/*.tsbuildinfo
 web/*.js
+!web/eslint.config.js
 web/*.d.ts
 .playwright-cli/
 .DS_Store
