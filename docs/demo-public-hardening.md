@@ -1,6 +1,6 @@
 # Demo 公网部署安全加固
 
-记录 AI Pub demo 站点公网部署的威胁模型与加固方案。demo 目标：让任意访客试用发布流程（mock 执行器），同时防止 demo 容器被用作 SSH 跳板或被默认凭据接管。demo 使用与用户一致的发布镜像（`hxjagf/ai-pub:latest`），兼作发布镜像可用性的活体验证，故不叠加 `compose.local-build.yaml` 走本地源码构建。
+记录 AI Pub demo 站点公网部署的威胁模型与加固方案。demo 目标：让任意访客试用发布流程（mock 执行器），同时防止 demo 容器被用作 SSH 跳板或被默认凭据接管。demo 使用自包含的 `deploy/compose.demo.yaml`，运行与用户一致的发布镜像（`hxjagf/ai-pub:latest`），兼作发布镜像可用性的活体验证，故不叠加 `compose.sqlite.yaml` 或 `compose.local-build.yaml`。
 
 ## 威胁模型
 
@@ -28,7 +28,7 @@ demo 站点暴露公网，任意访客可访问登录页与 API。需防御：
 
 ### 2. 密钥强制非空（防回退陷阱）
 
-`deploy/compose.demo.yaml` 三个密钥用 docker compose `${VAR:?msg}` 语法：
+`deploy/compose.demo.yaml` 三个安全值用 docker compose `${VAR:?msg}` 语法：
 
 ```yaml
 APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is required}
@@ -38,7 +38,7 @@ BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD i
 
 未设或为空时 compose 直接报错不启动，避免 dev 模式回退到公开默认密钥。密钥值由 `.env`（已 gitignore）提供，用 `openssl rand -hex 32` 生成。
 
-**注意**：`docker compose -f` 时 project directory 是 `deploy/`，不会默认加载项目根的 `.env`，故部署命令必须显式 `--env-file .env`（或 `make demo-up`）。
+**注意**：demo 部署时进入 `deploy/` 执行命令，并将 `.env` 放在 `deploy/` 下。这样 Compose 会按默认规则读取当前目录的 `.env`，命令无需额外指定环境文件。
 
 ### 3. 容器加固
 
@@ -83,6 +83,6 @@ make demo-up    # 重新启动（拉取发布镜像），数据归零
 - `EXECUTOR_SSH_DISABLED=true` 时创建 ssh 目标并执行 → worker 返回 `unsupported executor`，无 ssh 进程。
 - `POST /api/v1/servers/test` → 返回 `400 ssh_test_disabled`。
 - `EXECUTOR_K8S_DISABLED=true` 时 k8s 目标预检 → 不发起 K8s API 外联。
-- 删除 `.env` 的 `JWT_SECRET` → `make demo-up` 报错不启动。
+- 删除 `.env` 的任一必填安全值 → `make demo-up` 报错不启动。
 - `docker inspect` 确认 `CapDrop=[ALL]`、`ReadonlyRootfs=true`。
 - mock 目标发布闭环完整：创建→确认→执行→审计日志→发布记录。

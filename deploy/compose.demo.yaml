@@ -1,21 +1,26 @@
-# demo 公网部署 override。叠加在 compose.sqlite.yaml 之上，使用发布镜像 hxjagf/ai-pub:latest：
-#   docker compose --env-file .env -f deploy/compose.sqlite.yaml -f deploy/compose.demo.yaml up -d
+# demo 公网部署自包含 Compose 文件，使用发布镜像 hxjagf/ai-pub:latest：
+#   cd deploy
+#   docker compose -f compose.demo.yaml up -d
 #
 # demo 站点须与用户最终拉取的镜像一致，兼作发布镜像可用性的活体验证；
 # 故不叠加 compose.local-build.yaml 走本地源码构建——本地构建能跑 ≠ 发布镜像能跑。
 #
-# 注意：docker compose -f 时 project directory 是 deploy/，不会默认加载项目根的 .env，
-# 故必须显式 --env-file .env（或 --project-directory .），否则 :? 强制非空会报错。
+# 注意：部署时将 .env 放在 deploy/，Compose 会按默认规则读取当前目录的 .env；
+# 如从仓库根目录直接执行 -f deploy/compose.demo.yaml，则不会读取 deploy/.env。
 #
 # 安全要点：
 # - EXECUTOR_SSH_DISABLED/K8S_DISABLED=true：worker 只注册 mock，从代码层消除 SSH 跳板与 K8s 外联。
-# - 三个密钥用 ${VAR:?msg} 强制非空（dev 模式下空值会回退到公开默认密钥，见 config.go:33 / secret.go:22）。
+# - 三个安全值用 ${VAR:?msg} 强制非空（dev 模式下空值会回退到公开默认密钥，见 config.go:33 / secret.go:22）。
 # - cap_drop ALL + no-new-privileges + read_only：容器提权加固。
-# - 端口继承 base 的 127.0.0.1:18080，由反向代理转发 TLS（见 deploy/examples/nginx-demo.conf）。
+# - 端口绑 127.0.0.1:18080，由反向代理转发 TLS（见 deploy/examples/nginx-demo.conf）。
 services:
   app:
+    image: ${AI_PUB_IMAGE:-hxjagf/ai-pub:latest}
     environment:
       APP_ENV: dev
+      HTTP_ADDR: :8080
+      DB_DIALECT: sqlite
+      SQLITE_PATH: /data/ai-pub.db
       EXECUTOR_SSH_DISABLED: "true"
       EXECUTOR_K8S_DISABLED: "true"
       WORKER_ENABLED: "true"
@@ -23,6 +28,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD is required}
+    volumes:
+      - sqlite_data:/data
+    ports:
+      - "127.0.0.1:${APP_PORT:-18080}:8080"
     cap_drop:
       - ALL
     security_opt:
@@ -30,3 +39,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
+
+volumes:
+  sqlite_data:
