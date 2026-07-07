@@ -45,6 +45,16 @@ SQLite 模式不启动 MySQL，适合本地快速演示，不得用于生产。
 make compose-sqlite-up
 ```
 
+## 在线 demo
+
+提供一个公网 demo 站点供试用体验（执行器为 mock，不会触发真实 SSH/K8s 外联）：
+
+- 访问：`https://pub-demo.lanpang.top`
+- 体验账号：见 demo 站点登录页提示（不使用本地默认密码 `ai-pub-dev-admin`）
+- 数据定期重置，请勿存放敏感信息
+
+自建 demo 部署见 [deploy/README.md](deploy/README.md) 的「Demo 公网部署」小节；安全加固方案见 [docs/demo-public-hardening.md](docs/demo-public-hardening.md)。
+
 ## 验证
 
 ```bash
@@ -75,6 +85,8 @@ docker compose -f deploy/compose.sqlite.yaml down -v --remove-orphans
 - `deploy/compose.mysql.yaml`：镜像版 MySQL 正式本地环境使用。
 - `deploy/compose.sqlite.yaml`：镜像版 demo/local 轻量模式使用。
 - `deploy/compose.local-build.yaml`：开发者本地源码构建与验收 override，供 Makefile 叠加使用。
+- `deploy/compose.demo.yaml`：demo 公网部署加固 override，叠加 sqlite 使用发布镜像（`make demo-up`）。
+- `deploy/examples/`：demo 反向代理配置示例（Nginx/Caddy）。
 - `deploy/scripts/`：部署 YAML 需要搭配的辅助脚本。
 - `deploy/sql/`：部署侧初始化或运维 SQL 说明。
 

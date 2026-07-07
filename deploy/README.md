@@ -30,3 +30,27 @@ make compose-sqlite-up
 - `scripts/`：部署项目时需要随 YAML 搭配使用的辅助脚本。
 - `sql/`：部署侧初始化或运维 SQL 说明。
 - 应用 schema 迁移仍以仓库根目录的 `migrations/{mysql,sqlite}` 为准，不在 `deploy/sql` 复制一份。
+
+## Demo 公网部署
+
+`compose.demo.yaml` 是 demo 公网部署的加固 override，叠加在 `compose.sqlite.yaml` 之上，使用发布镜像 `hxjagf/ai-pub:latest`（不叠加 `compose.local-build.yaml`：demo 须与用户最终镜像一致，兼作发布镜像可用性的活体验证）：
+
+```bash
+# 1. 生成强随机密钥写入 .env（已 gitignore）
+cp .env.example .env
+#   用 openssl rand -hex 32 生成 APP_ENCRYPTION_KEY / JWT_SECRET，设强 BOOTSTRAP_ADMIN_PASSWORD
+
+# 2. 启动（--env-file .env 必填：docker compose -f 时 project directory 是 deploy/，不会默认加载项目根 .env）
+docker compose --env-file .env -f deploy/compose.sqlite.yaml -f deploy/compose.demo.yaml up -d
+
+# 3. 反向代理转发 TLS 到 127.0.0.1:18080（参考 deploy/examples/Caddyfile，需含 caddy-ratelimit 插件，见 Caddy.Dockerfile）
+```
+
+加固要点：
+
+- `EXECUTOR_SSH_DISABLED=true` + `EXECUTOR_K8S_DISABLED=true`：worker 只注册 mock，消除 SSH 跳板与 K8s 外联。
+- 三个密钥用 `${VAR:?msg}` 强制非空，未设或为空则 compose 报错不启动（dev 模式下空值会回退到公开默认密钥，见 `internal/config/config.go` 与 `internal/crypto/secret.go`）。
+- `cap_drop: [ALL]` + `no-new-privileges` + `read_only` + `tmpfs /tmp`：容器提权加固。
+- 端口绑 `127.0.0.1:18080`，公网访问走反向代理 + TLS。
+
+详见 `docs/demo-public-hardening.md`。

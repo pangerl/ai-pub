@@ -19,6 +19,8 @@ type Config struct {
 	MigrationAuto          bool
 	MigrationCheckOnly     bool
 	WorkerEnabled          bool
+	ExecutorSSHDisabled    bool
+	ExecutorK8sDisabled    bool
 }
 
 func Load() Config {
@@ -36,6 +38,8 @@ func Load() Config {
 		MigrationAuto:          envBool("MIGRATION_AUTO", true),
 		MigrationCheckOnly:     envBool("MIGRATION_CHECK_ONLY", false),
 		WorkerEnabled:          envBool("WORKER_ENABLED", true),
+		ExecutorSSHDisabled:    envBool("EXECUTOR_SSH_DISABLED", false),
+		ExecutorK8sDisabled:    envBool("EXECUTOR_K8S_DISABLED", false),
 	}
 }
 

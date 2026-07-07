@@ -27,7 +27,10 @@ func NewRouter(deps Dependencies) http.Handler {
 	credentials := app.NewCredentialService(store, box)
 	infrastructure := app.NewInfrastructureService(store, credentials)
 	notifications := app.NewNotificationService(store, box, nil)
-	releases := app.NewReleaseService(store, notifications).WithK8sPreflightChecker(executor.K8s{Credentials: credentials, Clusters: store})
+	releases := app.NewReleaseService(store, notifications)
+	if !deps.Config.ExecutorK8sDisabled {
+		releases = releases.WithK8sPreflightChecker(executor.K8s{Credentials: credentials, Clusters: store})
+	}
 	mux.HandleFunc("GET /healthz", healthz(deps))
 	mux.HandleFunc("POST /api/v1/auth/login", login(store, deps.Config.JWTSecret))
 	mux.HandleFunc("GET /api/v1/auth/me", currentUser())
@@ -48,8 +51,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /api/v1/servers", withOptionalAPIKeyScope(store, "inventory:read", listServers(store)))
 	mux.HandleFunc("POST /api/v1/servers", withAdmin(store, deps.Config.JWTSecret, createServer(store)))
 	mux.HandleFunc("PATCH /api/v1/servers/{id}", withAdmin(store, deps.Config.JWTSecret, patchServer(store)))
-	mux.HandleFunc("POST /api/v1/servers/test", withAdmin(store, deps.Config.JWTSecret, testServerConfig(infrastructure)))
-	mux.HandleFunc("POST /api/v1/servers/{id}/test", withAdmin(store, deps.Config.JWTSecret, testServer(infrastructure)))
+	mux.HandleFunc("POST /api/v1/servers/test", withAdmin(store, deps.Config.JWTSecret, testServerConfig(infrastructure, !deps.Config.ExecutorSSHDisabled)))
+	mux.HandleFunc("POST /api/v1/servers/{id}/test", withAdmin(store, deps.Config.JWTSecret, testServer(infrastructure, !deps.Config.ExecutorSSHDisabled)))
 	mux.HandleFunc("GET /api/v1/server-groups", withOptionalAPIKeyScope(store, "inventory:read", listServerGroups(store)))
 	mux.HandleFunc("POST /api/v1/server-groups", withAdmin(store, deps.Config.JWTSecret, createServerGroup(store)))
 	mux.HandleFunc("PATCH /api/v1/server-groups/{id}", withAdmin(store, deps.Config.JWTSecret, patchServerGroup(store)))
