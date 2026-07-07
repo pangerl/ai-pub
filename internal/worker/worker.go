@@ -20,14 +20,26 @@ type Service struct {
 	workerID      string
 }
 
-func NewService(store repository.Store, credentials app.CredentialService, notifications *app.NotificationService, workerID string) Service {
+// Options 控制 worker 注册哪些执行器。调用方显式传入启用状态；demo 公网部署时设
+// SSHEnabled/K8sEnabled 为 false，只保留 mock，从代码层消除 SSH 跳板与 K8s 外联风险。
+type Options struct {
+	SSHEnabled bool
+	K8sEnabled bool
+}
+
+func NewService(store repository.Store, credentials app.CredentialService, notifications *app.NotificationService, workerID string, opts Options) Service {
+	executors := map[string]executor.Executor{
+		"mock": executor.Mock{},
+	}
+	if opts.SSHEnabled {
+		executors["ssh"] = executor.SSH{Credentials: credentials}
+	}
+	if opts.K8sEnabled {
+		executors["k8s"] = executor.K8s{Credentials: credentials, Clusters: store}
+	}
 	return Service{
-		store: store,
-		executors: executor.NewRegistry(map[string]executor.Executor{
-			"mock": executor.Mock{},
-			"ssh":  executor.SSH{Credentials: credentials},
-			"k8s":  executor.K8s{Credentials: credentials, Clusters: store},
-		}),
+		store:         store,
+		executors:     executor.NewRegistry(executors),
 		credentials:   credentials,
 		notifications: notifications,
 		workerID:      workerID,

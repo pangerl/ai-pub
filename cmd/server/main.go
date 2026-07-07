@@ -79,7 +79,10 @@ func run() error {
 		box := crypto.NewBox(cfg.AppEncryptionKey)
 		credentialService := app.NewCredentialService(store, box)
 		notificationService := app.NewNotificationService(store, box, nil)
-		workerService := worker.NewService(store, credentialService, &notificationService, "worker_builtin")
+		workerService := worker.NewService(store, credentialService, &notificationService, "worker_builtin", worker.Options{
+			SSHEnabled: !cfg.ExecutorSSHDisabled,
+			K8sEnabled: !cfg.ExecutorK8sDisabled,
+		})
 		go workerService.RunLoop(ctx, 2*time.Second)
 	}
 

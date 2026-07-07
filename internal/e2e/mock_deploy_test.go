@@ -218,7 +218,7 @@ func TestSQLiteDeployUsesQueuedTargetSnapshot(t *testing.T) {
 	}
 
 	credentialService := app.NewCredentialService(store, crypto.NewBox(""))
-	workerService := worker.NewService(store, credentialService, nil, "snapshot_worker")
+	workerService := worker.NewService(store, credentialService, nil, "snapshot_worker", worker.Options{SSHEnabled: true, K8sEnabled: true})
 	if err := workerService.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestSQLiteWorkerRecoversExpiredLease(t *testing.T) {
 	if _, err := db.Exec(`UPDATE deploy_records SET lease_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`, claimed.Record.ID); err != nil {
 		t.Fatal(err)
 	}
-	workerService := worker.NewService(store, app.NewCredentialService(store, crypto.NewBox("test-encryption-key")), nil, "worker_two")
+	workerService := worker.NewService(store, app.NewCredentialService(store, crypto.NewBox("test-encryption-key")), nil, "worker_two", worker.Options{SSHEnabled: true, K8sEnabled: true})
 	if err := workerService.RunOnce(ctx); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected recovery then no queued work, got %v", err)
 	}
@@ -435,7 +435,7 @@ func TestSQLiteRollbackDeploy(t *testing.T) {
 		t.Fatal(err)
 	}
 	credentialService := app.NewCredentialService(store, crypto.NewBox(""))
-	workerService := worker.NewService(store, credentialService, nil, "rollback_worker")
+	workerService := worker.NewService(store, credentialService, nil, "rollback_worker", worker.Options{SSHEnabled: true, K8sEnabled: true})
 	if err := workerService.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func runMockReleaseWithNotifications(t *testing.T, ctx context.Context, db *sql.
 	}
 
 	credentialService := app.NewCredentialService(store, crypto.NewBox(""))
-	workerService := worker.NewService(store, credentialService, notifications, "test_worker")
+	workerService := worker.NewService(store, credentialService, notifications, "test_worker", worker.Options{SSHEnabled: true, K8sEnabled: true})
 	if err := workerService.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}

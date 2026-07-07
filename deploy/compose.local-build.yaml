@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: ..
+      target: app
+    image: ai-pub:local
+
+  verify:
+    profiles: [verify]
+    build:
+      context: ..
+      dockerfile: Dockerfile.verify
+    environment:
+      BASE_URL: http://app:8080
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        for i in $(seq 1 60); do
+          curl -fsS http://app:8080/healthz >/dev/null 2>&1 && break
+          sleep 1
+        done
+        curl -fsS http://app:8080/healthz >/dev/null
+        for i in $(seq 1 30); do
+          curl -fsS http://app:8080/ >/dev/null 2>&1 && break
+          sleep 1
+        done
+        curl -fsS http://app:8080/ >/dev/null
+        exec bash /app/scripts/local-functional-check.sh
+    depends_on:
+      app:
+        condition: service_started

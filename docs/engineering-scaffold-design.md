@@ -42,6 +42,7 @@
 ├── deploy/
 │   ├── compose.mysql.yaml
 │   ├── compose.sqlite.yaml
+│   ├── compose.local-build.yaml
 │   ├── scripts/
 │   └── sql/
 ├── Dockerfile
@@ -116,12 +117,13 @@ migrations/
 make compose-up
 ```
 
-Compose 启动 MySQL 和一个 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。应用访问地址为 `http://127.0.0.1:18080/`，MySQL 仅在 Compose 网络中运行。
+Makefile 叠加 `deploy/compose.local-build.yaml`，基于当前源码构建 `app` 容器；`app` 同时提供 SPA 静态资源、REST API、启动迁移和内置 Worker。应用访问地址为 `http://127.0.0.1:18080/`，MySQL 仅在 Compose 网络中运行。
 
 部署 YAML 集中在 `deploy/`：
 
-- `deploy/compose.mysql.yaml`：MySQL 正式本地环境和完整验收。
-- `deploy/compose.sqlite.yaml`：SQLite demo/local 轻量模式。
+- `deploy/compose.mysql.yaml`：镜像版 MySQL 正式本地环境。
+- `deploy/compose.sqlite.yaml`：镜像版 SQLite demo/local 轻量模式。
+- `deploy/compose.local-build.yaml`：开发者本地源码构建与验收 override，供 Makefile 叠加使用。
 
 ## 9. 测试命令
 

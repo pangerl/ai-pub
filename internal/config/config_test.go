@@ -51,3 +51,20 @@ func TestMigrationAutoCanBeDisabled(t *testing.T) {
 		t.Fatal("expected MIGRATION_AUTO=false to disable automatic migrations")
 	}
 }
+
+func TestExecutorDisabledFlagsDefaultToEnabled(t *testing.T) {
+	t.Setenv("EXECUTOR_SSH_DISABLED", "")
+	t.Setenv("EXECUTOR_K8S_DISABLED", "")
+
+	cfg := Load()
+	if cfg.ExecutorSSHDisabled || cfg.ExecutorK8sDisabled {
+		t.Fatalf("expected executor disabled flags to default false, got ssh=%v k8s=%v", cfg.ExecutorSSHDisabled, cfg.ExecutorK8sDisabled)
+	}
+
+	t.Setenv("EXECUTOR_SSH_DISABLED", "true")
+	t.Setenv("EXECUTOR_K8S_DISABLED", "true")
+	cfg = Load()
+	if !cfg.ExecutorSSHDisabled || !cfg.ExecutorK8sDisabled {
+		t.Fatalf("expected executor disabled flags from env, got ssh=%v k8s=%v", cfg.ExecutorSSHDisabled, cfg.ExecutorK8sDisabled)
+	}
+}

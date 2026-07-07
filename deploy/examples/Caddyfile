@@ -1,0 +1,29 @@
+# AI Pub demo 反向代理示例（Caddy）。
+# Caddy 自动签发 TLS 证书（需域名 A 记录指向本机且 80/443 可达）。
+#
+# 注意：rate_limit 来自 caddy-ratelimit 插件，Caddy 标准版不含此 directive。
+# 需用自定义 build（见同目录 Caddy.Dockerfile）：
+#   docker build -t caddy-rl -f deploy/examples/Caddy.Dockerfile .
+#   docker run --rm -p 80:80 -p 443:443 -v $(pwd)/deploy/examples/Caddyfile:/etc/caddy/Caddyfile caddy-rl
+# 或本地：xcaddy build --with github.com/mholt/caddy-ratelimit
+
+pub-demo.lanpang.top {
+	# 登录接口限流（每 IP 每分钟 5 次，补偿应用层无速率限制的 F2 风险）
+	rate_limit {
+		zone login {
+			match {
+				path /api/v1/auth/login
+			}
+			key    {remote_host}
+			window 1m
+			events 5
+		}
+	}
+
+	# 请求体大小限制（防超大 JSON body DoS）
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy 127.0.0.1:18080
+}
