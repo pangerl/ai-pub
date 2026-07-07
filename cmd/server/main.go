@@ -130,7 +130,7 @@ func ensureBootstrapAdmin(ctx context.Context, store repository.Store, cfg confi
 	}
 	hash, err := auth.HashPassword(cfg.BootstrapAdminPassword)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid BOOTSTRAP_ADMIN_PASSWORD: %w", err)
 	}
 	if err == nil && admin.ID != "" {
 		if err := store.SetUserPassword(ctx, admin.ID, hash); err != nil {
