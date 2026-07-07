@@ -1,7 +1,7 @@
 GOCACHE ?= $(CURDIR)/.cache/go-build
 MYSQL_COMPOSE_FILES = -f deploy/compose.mysql.yaml -f deploy/compose.local-build.yaml
 SQLITE_COMPOSE_FILES = -f deploy/compose.sqlite.yaml -f deploy/compose.local-build.yaml
-DEMO_COMPOSE_FILES = --env-file .env -f deploy/compose.sqlite.yaml -f deploy/compose.demo.yaml
+DEMO_COMPOSE_FILE = compose.demo.yaml
 
 .PHONY: test web-check verify compose-up compose-down compose-check compose-sqlite-up compose-sqlite-down compose-check-sqlite demo-up demo-down local-check
 
@@ -34,9 +34,9 @@ compose-check-sqlite:
 	APP_PORT=0 docker compose $(SQLITE_COMPOSE_FILES) --profile verify up --build --abort-on-container-exit --exit-code-from verify verify
 
 demo-up:
-	docker compose $(DEMO_COMPOSE_FILES) up -d
+	cd deploy && docker compose -f $(DEMO_COMPOSE_FILE) up -d
 
 demo-down:
-	docker compose $(DEMO_COMPOSE_FILES) down -v --remove-orphans
+	cd deploy && docker compose -f $(DEMO_COMPOSE_FILE) down -v --remove-orphans
 
 local-check: compose-check
