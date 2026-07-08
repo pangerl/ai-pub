@@ -10,3 +10,4 @@ web/*.js
 web/*.d.ts
 .playwright-cli/
 .DS_Store
+server
