@@ -104,9 +104,9 @@ func TestInventoryAPIFlow(t *testing.T) {
 	}
 
 	user := postForData(t, router, "/api/v1/users", map[string]any{
-		"username":     "admin",
+		"username":     "release-user",
 		"display_name": "管理员",
-		"role":         "admin",
+		"role":         "employee",
 		"password":     "local-test-password",
 	})
 	patchedUser := patchForData(t, router, "/api/v1/users/"+user["id"].(string), map[string]any{

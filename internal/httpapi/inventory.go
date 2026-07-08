@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
+	"ai-pub/internal/auth"
+	"ai-pub/internal/config"
 	"ai-pub/internal/domain"
 	"ai-pub/internal/repository"
 )
@@ -615,7 +618,7 @@ func createUser(store repository.Store) http.HandlerFunc {
 	}
 }
 
-func patchUser(store repository.Store) http.HandlerFunc {
+func patchUser(store repository.Store, cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		existing, err := store.GetUser(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -630,21 +633,135 @@ func patchUser(store repository.Store) http.HandlerFunc {
 		if !decodeJSON(w, r, &patch) {
 			return
 		}
+		next := existing
 		if patch.DisplayName != nil {
-			existing.DisplayName = *patch.DisplayName
+			next.DisplayName = strings.TrimSpace(*patch.DisplayName)
 		}
 		if patch.Role != nil {
-			existing.Role = *patch.Role
+			next.Role = *patch.Role
 		}
 		if patch.Enabled != nil {
-			existing.Enabled = *patch.Enabled
+			next.Enabled = *patch.Enabled
 		}
-		item, err := store.UpdateUser(r.Context(), existing.ID, existing)
+		actor, hasActor := currentSessionUser(r)
+		if err := validateUserPatch(r.Context(), store, cfg, existing, next, actor, hasActor); err != nil {
+			writeUserProtectionError(w, r, err)
+			return
+		}
+		item, err := store.UpdateUser(r.Context(), existing.ID, next)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
 			return
 		}
 		writeData(w, r, http.StatusOK, item)
+	}
+}
+
+func resetUserPassword(store repository.Store, cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		target, err := store.GetUser(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		actor, ok := currentSessionUser(r)
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthorized", errUnauthorized)
+			return
+		}
+		if err := validatePasswordReset(cfg, target, actor); err != nil {
+			writeUserProtectionError(w, r, err)
+			return
+		}
+		var input struct {
+			Password string `json:"password"`
+		}
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		hash, err := auth.HashPassword(input.Password)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
+		if err := store.SetUserPassword(r.Context(), target.ID, hash); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, map[string]string{"id": target.ID})
+	}
+}
+
+var (
+	errProtectedUser     = errors.New("protected user cannot be modified")
+	errLastAdminRequired = errors.New("at least one enabled admin is required")
+)
+
+func validateUserPatch(ctx context.Context, store repository.Store, cfg config.Config, existing, next, actor domain.User, hasActor bool) error {
+	if isProtectedUser(existing, cfg) {
+		if !hasActor || !canModifyProtectedUser(existing, actor, cfg) {
+			return errProtectedUser
+		}
+		if next.Role != "admin" || !next.Enabled {
+			return errProtectedUser
+		}
+	}
+	if existing.Role == "admin" && existing.Enabled && (next.Role != "admin" || !next.Enabled) {
+		count, err := store.CountEnabledAdmins(ctx)
+		if err != nil {
+			return err
+		}
+		if count <= 1 {
+			return errLastAdminRequired
+		}
+	}
+	return nil
+}
+
+func validatePasswordReset(cfg config.Config, target, actor domain.User) error {
+	if isDemoProtected(target, cfg) {
+		return errProtectedUser
+	}
+	if strings.EqualFold(target.Username, "admin") && !strings.EqualFold(actor.Username, "admin") {
+		return errProtectedUser
+	}
+	return nil
+}
+
+func canModifyProtectedUser(target, actor domain.User, cfg config.Config) bool {
+	return strings.EqualFold(target.Username, "admin") && strings.EqualFold(actor.Username, "admin") && !isDemoProtected(target, cfg)
+}
+
+func isProtectedUser(user domain.User, cfg config.Config) bool {
+	return strings.EqualFold(user.Username, "admin") || isDemoProtected(user, cfg)
+}
+
+func isDemoProtected(user domain.User, cfg config.Config) bool {
+	if !cfg.DemoMode {
+		return false
+	}
+	return protectedUsernames(cfg)[strings.ToLower(strings.TrimSpace(user.Username))]
+}
+
+func protectedUsernames(cfg config.Config) map[string]bool {
+	items := map[string]bool{}
+	for _, username := range strings.Split(cfg.DemoProtectedUsernames, ",") {
+		username = strings.ToLower(strings.TrimSpace(username))
+		if username != "" {
+			items[username] = true
+		}
+	}
+	return items
+}
+
+func writeUserProtectionError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, errProtectedUser):
+		writeError(w, r, http.StatusForbidden, "protected_user", err)
+	case errors.Is(err, errLastAdminRequired):
+		writeError(w, r, http.StatusBadRequest, "last_admin_required", err)
+	default:
+		writeError(w, r, http.StatusInternalServerError, "internal_error", err)
 	}
 }
 

@@ -56,6 +56,7 @@ make compose-sqlite-up
 - 体验账号：`demo`
 - 体验密码：`ai-pub-demo-2026`
 - 账号权限：管理员权限，可体验项目、服务、环境、部署目标和发布流程配置
+- 账号保护：demo 入口账号和内置 admin 账号不可被访客禁用、降级或重置密码
 - 数据定期重置，请勿存放敏感信息
 
 自建 demo 部署见 [deploy/README.md](deploy/README.md) 的「Demo 公网部署」小节；安全加固方案见 [docs/demo-public-hardening.md](docs/demo-public-hardening.md)。

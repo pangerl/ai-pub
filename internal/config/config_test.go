@@ -68,3 +68,20 @@ func TestExecutorDisabledFlagsDefaultToEnabled(t *testing.T) {
 		t.Fatalf("expected executor disabled flags from env, got ssh=%v k8s=%v", cfg.ExecutorSSHDisabled, cfg.ExecutorK8sDisabled)
 	}
 }
+
+func TestDemoProtectionConfigDefaults(t *testing.T) {
+	t.Setenv("DEMO_MODE", "")
+	t.Setenv("DEMO_PROTECTED_USERNAMES", "")
+
+	cfg := Load()
+	if cfg.DemoMode || cfg.DemoProtectedUsernames != "demo" {
+		t.Fatalf("expected demo protection defaults, got mode=%v users=%q", cfg.DemoMode, cfg.DemoProtectedUsernames)
+	}
+
+	t.Setenv("DEMO_MODE", "true")
+	t.Setenv("DEMO_PROTECTED_USERNAMES", "demo,guest")
+	cfg = Load()
+	if !cfg.DemoMode || cfg.DemoProtectedUsernames != "demo,guest" {
+		t.Fatalf("expected demo protection env, got mode=%v users=%q", cfg.DemoMode, cfg.DemoProtectedUsernames)
+	}
+}

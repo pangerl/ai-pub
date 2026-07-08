@@ -21,6 +21,8 @@ type Config struct {
 	WorkerEnabled          bool
 	ExecutorSSHDisabled    bool
 	ExecutorK8sDisabled    bool
+	DemoMode               bool
+	DemoProtectedUsernames string
 }
 
 func Load() Config {
@@ -40,6 +42,8 @@ func Load() Config {
 		WorkerEnabled:          envBool("WORKER_ENABLED", true),
 		ExecutorSSHDisabled:    envBool("EXECUTOR_SSH_DISABLED", false),
 		ExecutorK8sDisabled:    envBool("EXECUTOR_K8S_DISABLED", false),
+		DemoMode:               envBool("DEMO_MODE", false),
+		DemoProtectedUsernames: env("DEMO_PROTECTED_USERNAMES", "demo"),
 	}
 }
 

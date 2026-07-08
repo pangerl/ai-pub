@@ -197,3 +197,143 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 		t.Fatalf("employee key delete got %d: %s", deleteKeyRecorder.Code, deleteKeyRecorder.Body.String())
 	}
 }
+
+func TestProtectedUsersAndPasswordReset(t *testing.T) {
+	db := newHTTPTestDB(t)
+	store := repository.NewStore(db)
+	admin := createHTTPTestUser(t, store, "admin", "Root Admin", "admin", "admin-password")
+	manager := createHTTPTestUser(t, store, "manager", "Manager", "admin", "manager-password")
+	demo := createHTTPTestUser(t, store, "demo", "Demo", "admin", "demo-password")
+	employee := createHTTPTestUser(t, store, "employee", "Employee", "employee", "employee-password")
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{JWTSecret: "test-session-secret", DemoMode: true, DemoProtectedUsernames: "demo"}})
+
+	managerCookie := loginCookie(t, router, "manager", "manager-password")
+	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+admin.ID, map[string]any{"display_name": "Changed"}, managerCookie, http.StatusForbidden)
+	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+admin.ID, map[string]any{"enabled": false}, managerCookie, http.StatusForbidden)
+	postWithCookieExpectStatus(t, router, "/api/v1/users/"+admin.ID+"/password", map[string]any{"password": "changed-password"}, managerCookie, http.StatusForbidden)
+
+	adminKey, err := store.CreateAPIKey(context.Background(), domain.APIKey{Name: "admin-key", OwnerUserID: manager.ID, Scopes: `["admin:write"]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchWithHeadersExpectStatus(t, router, "/api/v1/users/"+admin.ID, map[string]any{"enabled": false}, map[string]string{"Authorization": "Bearer " + adminKey.Plaintext}, http.StatusForbidden)
+	postWithHeadersExpectStatus(t, router, "/api/v1/users/"+employee.ID+"/password", map[string]any{"password": "key-password"}, map[string]string{"Authorization": "Bearer " + adminKey.Plaintext}, http.StatusUnauthorized)
+
+	demoCookie := loginCookie(t, router, "demo", "demo-password")
+	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+demo.ID, map[string]any{"enabled": false}, demoCookie, http.StatusForbidden)
+	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+demo.ID, map[string]any{"role": "employee"}, demoCookie, http.StatusForbidden)
+	postWithCookieExpectStatus(t, router, "/api/v1/users/"+demo.ID+"/password", map[string]any{"password": "changed-demo-password"}, demoCookie, http.StatusForbidden)
+
+	postWithCookieExpectStatus(t, router, "/api/v1/users/"+employee.ID+"/password", map[string]any{"password": "employee-new-password"}, managerCookie, http.StatusOK)
+	loginExpectStatus(t, router, "employee", "employee-password", http.StatusUnauthorized)
+	loginExpectStatus(t, router, "employee", "employee-new-password", http.StatusOK)
+
+	adminCookie := loginCookie(t, router, "admin", "admin-password")
+	postWithCookieExpectStatus(t, router, "/api/v1/users/"+admin.ID+"/password", map[string]any{"password": "admin-new-password"}, adminCookie, http.StatusOK)
+	loginExpectStatus(t, router, "admin", "admin-password", http.StatusUnauthorized)
+	loginExpectStatus(t, router, "admin", "admin-new-password", http.StatusOK)
+}
+
+func TestLastEnabledAdminCannotBeRemoved(t *testing.T) {
+	db := newHTTPTestDB(t)
+	store := repository.NewStore(db)
+	solo := createHTTPTestUser(t, store, "solo-admin", "Solo", "admin", "solo-password")
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{JWTSecret: "test-session-secret"}})
+	cookie := loginCookie(t, router, "solo-admin", "solo-password")
+
+	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+solo.ID, map[string]any{"enabled": false}, cookie, http.StatusBadRequest)
+	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+solo.ID, map[string]any{"role": "employee"}, cookie, http.StatusBadRequest)
+}
+
+func createHTTPTestUser(t *testing.T, store repository.Store, username, displayName, role, password string) domain.User {
+	t.Helper()
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.CreateUserWithPassword(context.Background(), domain.User{Username: username, DisplayName: displayName, Role: role, PasswordHash: hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user
+}
+
+func loginCookie(t *testing.T, handler http.Handler, username, password string) *http.Cookie {
+	t.Helper()
+	req := jsonRequest(t, http.MethodPost, "/api/v1/auth/login", map[string]any{"username": username, "password": password})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || len(rec.Result().Cookies()) == 0 {
+		t.Fatalf("login %s got status %d body %s", username, rec.Code, rec.Body.String())
+	}
+	return rec.Result().Cookies()[0]
+}
+
+func loginExpectStatus(t *testing.T, handler http.Handler, username, password string, status int) {
+	t.Helper()
+	req := jsonRequest(t, http.MethodPost, "/api/v1/auth/login", map[string]any{"username": username, "password": password})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("login %s got status %d body %s", username, rec.Code, rec.Body.String())
+	}
+}
+
+func patchWithCookieExpectStatus(t *testing.T, handler http.Handler, path string, body map[string]any, cookie *http.Cookie, status int) {
+	t.Helper()
+	req := jsonRequest(t, http.MethodPatch, path, body)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("PATCH %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func patchWithHeadersExpectStatus(t *testing.T, handler http.Handler, path string, body map[string]any, headers map[string]string, status int) {
+	t.Helper()
+	req := jsonRequest(t, http.MethodPatch, path, body)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("PATCH %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func postWithCookieExpectStatus(t *testing.T, handler http.Handler, path string, body map[string]any, cookie *http.Cookie, status int) {
+	t.Helper()
+	req := jsonRequest(t, http.MethodPost, path, body)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("POST %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func postWithHeadersExpectStatus(t *testing.T, handler http.Handler, path string, body map[string]any, headers map[string]string, status int) {
+	t.Helper()
+	req := jsonRequest(t, http.MethodPost, path, body)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("POST %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func jsonRequest(t *testing.T, method, path string, body map[string]any) *http.Request {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}

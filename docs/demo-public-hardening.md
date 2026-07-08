@@ -50,7 +50,22 @@ BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD i
 - `tmpfs: [/tmp:rw,noexec,nosuid,size=64m]`：临时目录可写不可执行。
 - 端口绑 `127.0.0.1:18080`：公网访问走反向代理。
 
-### 4. 反向代理 + TLS
+### 4. 保留账号与 demo 入口账号保护
+
+`deploy/compose.demo.yaml` 设置：
+
+```yaml
+DEMO_MODE: "true"
+DEMO_PROTECTED_USERNAMES: ${DEMO_PROTECTED_USERNAMES:-demo}
+```
+
+效果：
+
+- 内置 `admin` 账号始终作为保留管理员，不能被其他管理员或 API Key 禁用、降级、修改资料或重置密码；`admin` 密码只能由 `admin` 本人会话重置。
+- demo 模式下，`demo` 入口账号不能被禁用、降级或重置密码，避免访客把公网入口改坏。
+- 仍允许 demo 管理员创建和编辑普通试用用户，以保留管理界面体验。
+
+### 5. 反向代理 + TLS
 
 `deploy/examples/Caddyfile`（主推荐）：Caddy 自动 TLS + `rate_limit`（caddy-ratelimit 插件）保护登录接口每 IP 每分钟 5 次（补偿应用层无速率限制的 F2 风险）+ `request_body max_size 1MB` 防超大 body DoS。需含插件的自定义 build（见 `deploy/examples/Caddy.Dockerfile`，`xcaddy build --with github.com/mholt/caddy-ratelimit`）。
 
@@ -65,7 +80,7 @@ BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD i
 | `JWT_SECRET=""` 免鉴权后门 | `middleware.go:32-34` 空值绕过 | compose `:?` 强制非空，未改代码 |
 | Cookie Secure 反代后失效 | `session.go:34` `r.TLS!=nil` | demo 接受，后续可固定 `Secure: true` |
 | IDOR | 发布单/部署记录无 ownership | demo 数据可重置 |
-| 无密码修改接口 | `SetUserPassword` 无 HTTP handler | demo 数据可重置 |
+| 普通试用用户可被其他访客修改 | demo 管理员仍可编辑普通用户 | 保留 `admin`/`demo` 保护，并定期重置 demo 数据 |
 
 ## 数据重置策略
 
@@ -84,5 +99,6 @@ make demo-up    # 重新启动（拉取发布镜像），数据归零
 - `POST /api/v1/servers/test` → 返回 `400 ssh_test_disabled`。
 - `EXECUTOR_K8S_DISABLED=true` 时 k8s 目标预检 → 不发起 K8s API 外联。
 - 删除 `.env` 的任一必填安全值 → `make demo-up` 报错不启动。
+- demo 账号不能禁用、降级或重置自身密码；demo 账号不能修改 `admin`。
 - `docker inspect` 确认 `CapDrop=[ALL]`、`ReadonlyRootfs=true`。
 - mock 目标发布闭环完整：创建→确认→执行→审计日志→发布记录。

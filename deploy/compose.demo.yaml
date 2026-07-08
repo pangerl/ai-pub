@@ -21,6 +21,8 @@ services:
       HTTP_ADDR: :8080
       DB_DIALECT: sqlite
       SQLITE_PATH: /data/ai-pub.db
+      DEMO_MODE: "true"
+      DEMO_PROTECTED_USERNAMES: ${DEMO_PROTECTED_USERNAMES:-demo}
       EXECUTOR_SSH_DISABLED: "true"
       EXECUTOR_K8S_DISABLED: "true"
       WORKER_ENABLED: "true"
