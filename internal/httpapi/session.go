@@ -65,12 +65,18 @@ func createSessionUser(store repository.Store) http.HandlerFunc {
 		if !decodeJSON(w, r, &input) {
 			return
 		}
+		input.Username = strings.TrimSpace(input.Username)
+		input.DisplayName = strings.TrimSpace(input.DisplayName)
+		if input.Username == "" {
+			writeError(w, r, http.StatusBadRequest, "invalid_argument", errors.New("username is required"))
+			return
+		}
 		hash, err := auth.HashPassword(input.Password)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
 			return
 		}
-		item, err := store.CreateUserWithPassword(r.Context(), domain.User{Username: strings.TrimSpace(input.Username), DisplayName: strings.TrimSpace(input.DisplayName), Role: input.Role, PasswordHash: hash})
+		item, err := store.CreateUserWithPassword(r.Context(), domain.User{Username: input.Username, DisplayName: input.DisplayName, Role: input.Role, PasswordHash: hash})
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_argument", err)
 			return

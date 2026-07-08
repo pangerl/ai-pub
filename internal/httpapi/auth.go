@@ -81,6 +81,24 @@ func withAdmin(store repository.Store, jwtSecret string, next http.HandlerFunc) 
 	}
 }
 
+func withAdminSession(jwtSecret string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if user, ok := currentSessionUser(r); ok {
+			if user.Role != "admin" {
+				writeError(w, r, http.StatusForbidden, "forbidden", errForbidden)
+				return
+			}
+			next(w, r)
+			return
+		}
+		if jwtSecret == "" && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			next(w, r)
+			return
+		}
+		writeError(w, r, http.StatusUnauthorized, "unauthorized", errUnauthorized)
+	}
+}
+
 // withSessionUser 允许任意已登录会话用户访问；管理员 API 密钥亦可。
 // 普通用户仅用于读取用户目录等最小展示场景。
 func withSessionUser(store repository.Store, jwtSecret string, next http.HandlerFunc) http.HandlerFunc {

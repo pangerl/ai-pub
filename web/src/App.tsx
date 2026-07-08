@@ -360,6 +360,7 @@ export function App() {
   const [managementView, setManagementView] = useState<ManagementView>('overview');
   // 系统页创建抽屉：mgmtCreatingKind 标记正在创建的实体类型，独立于配置页状态机。
   const [mgmtCreatingKind, setMgmtCreatingKind] = useState<ManagementCreatingKind | null>(null);
+  const [editingUser, setEditingUser] = useState<Entity | null>(null);
   // 个人访问密钥页创建抽屉（ownKey 变体，独立于系统页集成密钥）。
   const [apiKeyCreating, setApiKeyCreating] = useState(false);
   // 配置页编辑抽屉：统一用一个 selectedEditor 记录正在编辑的实体（带 _kind 标记）。
@@ -599,6 +600,11 @@ export function App() {
       setError(err instanceof Error ? err.message : '加载失败');
     }
   }, [activeDeployID, activeReleaseID, currentUser, fetchWorkbenchSlice, selection.serviceID]);
+
+  const refreshUsers = useCallback(async () => {
+    const users = await apiGet<Entity[]>('/api/v1/users');
+    setState((current) => ({ ...current, users }));
+  }, []);
 
   const refreshWithSelection = useCallback(
     (patch: Partial<Selection>) => {
@@ -1403,17 +1409,18 @@ export function App() {
             <section className="management-layout"><nav className="management-nav" aria-label="管理模块"><ManagementNavButton active={managementView === 'overview'} label="管理概览" note="查看关键状态" count={state.users.length} onClick={() => setManagementView('overview')} /><ManagementNavButton active={managementView === 'users'} label="用户与权限" note="确认发布身份" count={state.users.length} onClick={() => setManagementView('users')} /><ManagementNavButton active={managementView === 'access'} label="集成访问密钥" note="访问密钥与 scopes" count={state.apiKeys.length} onClick={() => setManagementView('access')} /><ManagementNavButton active={managementView === 'notifications'} label="通知与投递" note="机器人与发送记录" count={state.notificationConfigs.length} onClick={() => setManagementView('notifications')} /><ManagementNavButton active={managementView === 'credentials'} label="连接凭据" note="SSH / Kubeconfig" count={state.credentials.length} onClick={() => setManagementView('credentials')} /></nav>
               <div className="management-workspace">
                 {managementView === 'overview' ? <><section className="surface management-summary"><SectionTitle title="管理状态" meta="CONTROL PLANE" /><div className="management-stat-grid"><ManagementStat label="可用用户" value={state.users.filter((item) => item.enabled !== false).length} note="可登录并参与发布" onClick={() => setManagementView('users')} /><ManagementStat label="启用访问密钥" value={state.apiKeys.filter((item) => item.enabled !== false).length} note="供 CI/CD 和脚本调用" onClick={() => setManagementView('access')} /><ManagementStat label="启用通知" value={state.notificationConfigs.filter((item) => item.enabled !== false).length} note="企业微信机器人" onClick={() => setManagementView('notifications')} /><ManagementStat label="投递异常" value={state.notificationDeliveries.filter((item) => item.status !== 'sent').length} note="查看最近失败原因" onClick={() => setManagementView('notifications')} /></div></section><section className="surface management-guide"><span className="mono-label">日常管理</span><h2>只在需要时打开对应的管理面板。</h2><div><button onClick={() => setManagementView('users')}>新增发布用户 <span>用户与权限 →</span></button><button onClick={() => setManagementView('access')}>创建 CI/CD 访问密钥 <span>集成访问密钥 →</span></button><button onClick={() => setManagementView('notifications')}>测试通知机器人 <span>通知与投递 →</span></button></div></section></> : null}
-                {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('user')}>新建用户</Button></div><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onDone={() => void refreshAll()} /></section></> : null}
+                {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('user')}>新建用户</Button></div><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onOpen={setEditingUser} onDone={() => void refreshUsers()} /></section></> : null}
                 {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('api-key')}>新建访问密钥</Button></div><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section></> : null}
                 {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('notification')}>新建通知配置</Button></div><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><NotificationDeliveryList data={state.notificationDeliveries} configs={state.notificationConfigs} /></section></> : null}
                 {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据供 SSH 服务器和 K8s 集群连接引用；Secret 不会在创建后再次展示。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('credential')}>新建凭据</Button></div><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><CredentialList data={state.credentials} servers={state.servers} k8sClusters={state.k8sClusters} onDone={() => void refreshAll()} /></section></> : null}
               </div>
               <Drawer title={mgmtCreatingKind ? mgmtCreateTitles[mgmtCreatingKind] : ''} open={mgmtCreatingKind !== null} onClose={() => setMgmtCreatingKind(null)} width={520} footer={null} destroyOnClose>
-                {mgmtCreatingKind === 'user' ? <UserForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
+                {mgmtCreatingKind === 'user' ? <UserForm onDone={() => { void refreshUsers(); setMgmtCreatingKind(null); }} /> : null}
                 {mgmtCreatingKind === 'api-key' ? <APIKeyForm users={state.users} onCreated={() => { void refreshAll(); }} /> : null}
                 {mgmtCreatingKind === 'notification' ? <NotificationForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
                 {mgmtCreatingKind === 'credential' ? <CredentialForm onDone={() => { void refreshAll(); setMgmtCreatingKind(null); }} /> : null}
               </Drawer>
+              <UserEditDrawer user={editingUser} currentUser={currentUser} open={editingUser !== null} onClose={() => setEditingUser(null)} onDone={() => { void refreshUsers(); setEditingUser(null); }} onPasswordReset={() => { void refreshUsers(); api.success('密码已重置'); }} />
             </section>
           </> : null}
           {page === 'api-keys' ? <><PageHeading eyebrow="PERSONAL ACCESS" title="个人访问密钥" description="为 CI/CD 或本地脚本创建受 scope 限制的访问凭证。" /><section className="surface access-key-brief"><div><span className="mono-label">使用边界</span><h2>密钥只在创建时显示一次。</h2><p>请立即保存到受保护的 CI/CD 变量中。禁用或删除后，使用它的调用会立刻失效。</p></div><div className="access-key-facts"><span><b>{state.apiKeys.length}</b> 已创建</span><span><b>{state.apiKeys.filter((item) => item.enabled !== false).length}</b> 已启用</span><span>密钥归属当前登录用户</span></div></section><section className="access-key-layout"><div className="access-key-workspace"><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setApiKeyCreating(true)}>新建访问密钥</Button></div><section className="surface access-key-inventory"><SectionTitle title="我的访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section><section className="surface access-key-guide"><span className="mono-label">最小权限</span><h2>只授予调用真正需要的 scopes。</h2><p>发布创建、确认、回滚和读取日志分别对应不同 scope；生产发布依然受管理员确认约束。</p></section></div></section><Drawer title="新建访问密钥" open={apiKeyCreating} onClose={() => setApiKeyCreating(false)} width={520} footer={null} destroyOnClose><APIKeyForm users={[]} ownKey onCreated={() => { void refreshAll(); }} /></Drawer></> : null}
@@ -2655,7 +2662,7 @@ function UserForm({ onDone }: { onDone: (user: Entity) => void }) {
   );
 }
 
-function UserList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
+function UserList({ data, onOpen, onDone }: { data: Entity[]; onOpen: (user: Entity) => void; onDone: () => void }) {
   const [busyID, setBusyID] = useState('');
   async function setEnabled(item: Entity, enabled: boolean) {
     setBusyID(String(item.id ?? ''));
@@ -2673,24 +2680,141 @@ function UserList({ data, onDone }: { data: Entity[]; onDone: () => void }) {
         data={data}
         renderItem={(item) => {
           const enabled = item.enabled !== false;
+          const protectedUser = isFrontendProtectedUser(item);
           return (
             <div className="data-row">
-              <div className="data-main">
+              <div className="data-main" role="button" onClick={() => onOpen(item)} style={{ cursor: 'pointer' }}>
                 <Space>
                   <Typography.Text strong>{displayValue(item.display_name ?? item.username ?? item.id)}</Typography.Text>
                   <StatusTag value={enabled ? 'enabled' : 'disabled'} />
                 </Space>
                 <Typography.Text type="secondary">{`${item.username ?? '-'} / ${roleLabel(item.role)}`}</Typography.Text>
               </div>
-              <Button loading={busyID === item.id} onClick={() => void setEnabled(item, !enabled)}>
-                {enabled ? '禁用' : '启用'}
-              </Button>
+              <Space size="small">
+                <Button size="small" onClick={() => onOpen(item)}>编辑</Button>
+                <Button size="small" loading={busyID === item.id} disabled={protectedUser} onClick={() => void setEnabled(item, !enabled)}>
+                  {enabled ? '禁用' : '启用'}
+                </Button>
+              </Space>
             </div>
           );
         }}
       />
     </div>
   );
+}
+
+function UserEditDrawer({ user, currentUser, open, onClose, onDone, onPasswordReset }: { user: Entity | null; currentUser: Entity | null; open: boolean; onClose: () => void; onDone: () => void; onPasswordReset: () => void }) {
+  const [form] = Form.useForm();
+  const [passwordForm] = Form.useForm();
+  const [loading, setLoading] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const protectedUser = user ? isFrontendProtectedUser(user) : false;
+  const canEditProfile = user ? canFrontendEditUser(user, currentUser) : false;
+  const canResetPassword = user ? canFrontendResetPassword(user, currentUser) : false;
+  useEffect(() => {
+    if (open && user) {
+      form.setFieldsValue({
+        display_name: user.display_name ?? '',
+        role: user.role ?? 'employee',
+        enabled: user.enabled !== false,
+      });
+      passwordForm.resetFields();
+    }
+  }, [form, open, passwordForm, user]);
+  async function submit() {
+    if (!user || !canEditProfile) return;
+    let values: Entity;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    setLoading(true);
+    try {
+      await apiPatch<Entity>(`/api/v1/users/${user.id}`, values);
+      onDone();
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function resetPassword() {
+    if (!user || !canResetPassword) return;
+    let values: { password: string };
+    try {
+      values = await passwordForm.validateFields();
+    } catch {
+      return;
+    }
+    setPasswordLoading(true);
+    try {
+      await apiPost<Entity>(`/api/v1/users/${user.id}/password`, values);
+      passwordForm.resetFields();
+      onPasswordReset();
+    } finally {
+      setPasswordLoading(false);
+    }
+  }
+  return (
+    <Drawer title={user ? `编辑用户 · ${displayValue(user.username ?? user.id)}` : '编辑用户'} open={open} onClose={onClose} width={520} footer={null} destroyOnClose>
+      {user ? (
+        <Space direction="vertical" size={18} style={{ width: '100%' }}>
+          {protectedUser ? <Alert type="info" showIcon message="保留账号受保护，危险操作会被服务端拒绝。" /> : null}
+          <Form form={form} layout="vertical">
+            <Form.Item label="用户名">
+              <Input value={String(user.username ?? '')} disabled />
+            </Form.Item>
+            <Form.Item name="display_name" label="显示名">
+              <Input disabled={!canEditProfile} />
+            </Form.Item>
+            <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+              <Select
+                disabled={!canEditProfile || protectedUser}
+                options={[
+                  { label: '员工（employee）', value: 'employee' },
+                  { label: '管理员（admin）', value: 'admin' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="enabled" valuePropName="checked">
+              <Checkbox disabled={!canEditProfile || protectedUser}>启用账号</Checkbox>
+            </Form.Item>
+            <Space>
+              <Button type="primary" loading={loading} disabled={!canEditProfile} onClick={() => void submit()}>保存</Button>
+              <Button onClick={onClose}>取消</Button>
+            </Space>
+          </Form>
+          <Form form={passwordForm} layout="vertical">
+            <Form.Item name="password" label="重置密码" rules={[{ required: true, min: 8, message: '密码至少 8 位' }]}>
+              <Input.Password disabled={!canResetPassword} />
+            </Form.Item>
+            <Popconfirm title="确认重置密码？" okText="重置" cancelText="取消" onConfirm={() => void resetPassword()} disabled={!canResetPassword}>
+              <Button danger loading={passwordLoading} disabled={!canResetPassword}>重置密码</Button>
+            </Popconfirm>
+          </Form>
+        </Space>
+      ) : null}
+    </Drawer>
+  );
+}
+
+function canFrontendEditUser(user: Entity, currentUser: Entity | null) {
+  const username = String(user.username ?? '');
+  if (username === 'demo') return false;
+  if (username === 'admin') return String(currentUser?.username ?? '') === 'admin';
+  return true;
+}
+
+function canFrontendResetPassword(user: Entity, currentUser: Entity | null) {
+  const username = String(user.username ?? '');
+  if (username === 'demo') return false;
+  if (username === 'admin') return String(currentUser?.username ?? '') === 'admin';
+  return true;
+}
+
+function isFrontendProtectedUser(user: Entity) {
+  const username = String(user.username ?? '');
+  return username === 'admin' || username === 'demo';
 }
 
 function entityOption(item: Entity) {

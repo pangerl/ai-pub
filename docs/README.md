@@ -16,6 +16,7 @@
 10. `kubernetes-deployment-executor-implementation-plan.md`：Kubernetes Deployment executor 的阶段拆分、涉及文件、测试点和验收标准。
 11. `development-completion-audit.md`：当前开发完成审查、已验证范围、验收入口和暂缓项。
 12. `local-verification.md`：本地 Compose 验收、人工验证路径和外部专项验证记录。
+13. `2026070701-用户管理与-demo-账号保护整改方案.md`：用户编辑、密码重置、保留管理员和公网 demo 入口账号保护的整改方案。
 
 第一版实现时应始终遵守：
 

@@ -66,6 +66,7 @@ docker compose -f compose.demo.yaml up -d
 相对 `compose.sqlite.yaml`，`compose.demo.yaml` 额外启用以下公网加固：
 
 - `EXECUTOR_SSH_DISABLED=true` + `EXECUTOR_K8S_DISABLED=true`：worker 只注册 mock，消除 SSH 跳板与 K8s 外联。
+- `DEMO_MODE=true` + `DEMO_PROTECTED_USERNAMES=demo`：保护公网入口账号，访客即使拥有管理员权限也不能禁用、降级或重置 demo 账号；内置 `admin` 账号也受保留账号规则保护。
 - 三个安全值用 `${VAR:?msg}` 强制非空，未设或为空则 compose 报错不启动（dev 模式下空值会回退到公开默认密钥，见 `internal/config/config.go` 与 `internal/crypto/secret.go`）。
 - `cap_drop: [ALL]` + `no-new-privileges` + `read_only` + `tmpfs /tmp`：容器提权加固。
 - 端口绑 `127.0.0.1:18080`，公网访问走反向代理 + TLS。

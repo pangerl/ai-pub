@@ -834,6 +834,12 @@ func (s Store) CountUsers(ctx context.Context) (int, error) {
 	return count, err
 }
 
+func (s Store) CountEnabledAdmins(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'admin' AND enabled = 1`).Scan(&count)
+	return count, err
+}
+
 func (s Store) SetUserPassword(ctx context.Context, id, passwordHash string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE users SET password_hash = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?`, passwordHash, formatTime(nowUTC()), id)
