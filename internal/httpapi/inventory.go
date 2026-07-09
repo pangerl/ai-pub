@@ -692,9 +692,38 @@ func resetUserPassword(store repository.Store, cfg config.Config) http.HandlerFu
 	}
 }
 
+func deleteUser(store repository.Store, cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		target, err := store.GetUser(r.Context(), r.PathValue("id"))
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				writeError(w, r, http.StatusNotFound, "not_found", err)
+				return
+			}
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		actor, hasActor := currentSessionUser(r)
+		if err := validateUserDelete(r.Context(), store, cfg, target, actor, hasActor); err != nil {
+			writeUserProtectionError(w, r, err)
+			return
+		}
+		if err := store.DeleteUser(r.Context(), target.ID); err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				writeError(w, r, http.StatusNotFound, "not_found", err)
+				return
+			}
+			writeError(w, r, http.StatusInternalServerError, "internal_error", err)
+			return
+		}
+		writeData(w, r, http.StatusOK, map[string]string{"id": target.ID})
+	}
+}
+
 var (
 	errProtectedUser     = errors.New("protected user cannot be modified")
 	errLastAdminRequired = errors.New("at least one enabled admin is required")
+	errDeleteSelf        = errors.New("current user cannot be deleted")
 )
 
 func validateUserPatch(ctx context.Context, store repository.Store, cfg config.Config, existing, next, actor domain.User, hasActor bool) error {
@@ -724,6 +753,25 @@ func validatePasswordReset(cfg config.Config, target, actor domain.User) error {
 	}
 	if strings.EqualFold(target.Username, "admin") && !strings.EqualFold(actor.Username, "admin") {
 		return errProtectedUser
+	}
+	return nil
+}
+
+func validateUserDelete(ctx context.Context, store repository.Store, cfg config.Config, target, actor domain.User, hasActor bool) error {
+	if isProtectedUser(target, cfg) {
+		return errProtectedUser
+	}
+	if hasActor && target.ID == actor.ID {
+		return errDeleteSelf
+	}
+	if target.Role == "admin" && target.Enabled {
+		count, err := store.CountEnabledAdmins(ctx)
+		if err != nil {
+			return err
+		}
+		if count <= 1 {
+			return errLastAdminRequired
+		}
 	}
 	return nil
 }
@@ -758,6 +806,8 @@ func writeUserProtectionError(w http.ResponseWriter, r *http.Request, err error)
 	switch {
 	case errors.Is(err, errProtectedUser):
 		writeError(w, r, http.StatusForbidden, "protected_user", err)
+	case errors.Is(err, errDeleteSelf):
+		writeError(w, r, http.StatusForbidden, "forbidden", err)
 	case errors.Is(err, errLastAdminRequired):
 		writeError(w, r, http.StatusBadRequest, "last_admin_required", err)
 	default:

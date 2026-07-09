@@ -429,6 +429,30 @@ func TestInventoryAPIFlow(t *testing.T) {
 	if !bytes.Contains(opsBytes, []byte("total_release_requests")) {
 		t.Fatalf("expected ops summary fields, got %s", opsBytes)
 	}
+	postForData(t, router, "/api/v1/users", map[string]any{
+		"username":     "backup-admin",
+		"display_name": "Backup Admin",
+		"role":         "admin",
+		"password":     "backup-admin-password",
+	})
+	deleteForData(t, router, "/api/v1/users/"+user["id"].(string))
+	usersAfterDelete := getForData(t, router, "/api/v1/users")
+	usersAfterDeleteBytes, err := json.Marshal(usersAfterDelete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(usersAfterDeleteBytes, []byte(user["id"].(string))) {
+		t.Fatalf("expected deleted user to be removed, got %s", usersAfterDeleteBytes)
+	}
+	keysAfterUserDelete := getForData(t, router, "/api/v1/api-keys")
+	keysAfterUserDeleteBytes, err := json.Marshal(keysAfterUserDelete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(keysAfterUserDeleteBytes, []byte(deployReadKey["key"].(map[string]any)["id"].(string))) ||
+		bytes.Contains(keysAfterUserDeleteBytes, []byte(readOnlyKey["key"].(map[string]any)["id"].(string))) {
+		t.Fatalf("expected deleted user's api keys to be removed, got %s", keysAfterUserDeleteBytes)
+	}
 }
 
 // TestReleaseListPagination 覆盖发布单列表的服务端筛选与分页：
@@ -794,6 +818,18 @@ func TestCredentialLifecycle(t *testing.T) {
 	})
 	deleteForData(t, router, "/api/v1/credentials/"+unreferenced["id"].(string))
 	deleteExpectStatus(t, router, "/api/v1/credentials/"+unreferenced["id"].(string), http.StatusNotFound)
+}
+
+func TestLastEnabledAdminCannotBeDeleted(t *testing.T) {
+	db := newHTTPTestDB(t)
+	store := repository.NewStore(db)
+	user, err := store.CreateUserWithPassword(context.Background(), domain.User{Username: "solo-admin", DisplayName: "Solo", Role: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{}})
+
+	deleteExpectStatus(t, router, "/api/v1/users/"+user.ID, http.StatusBadRequest)
 }
 
 // TestNotificationConfigDelete 覆盖通知配置删除，以及删除后投递记录保留。

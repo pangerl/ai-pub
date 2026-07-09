@@ -247,6 +247,30 @@ func TestLastEnabledAdminCannotBeRemoved(t *testing.T) {
 	patchWithCookieExpectStatus(t, router, "/api/v1/users/"+solo.ID, map[string]any{"role": "employee"}, cookie, http.StatusBadRequest)
 }
 
+func TestUserDeleteSessionProtections(t *testing.T) {
+	db := newHTTPTestDB(t)
+	store := repository.NewStore(db)
+	admin := createHTTPTestUser(t, store, "admin", "Root Admin", "admin", "admin-password")
+	manager := createHTTPTestUser(t, store, "manager", "Manager", "admin", "manager-password")
+	demo := createHTTPTestUser(t, store, "demo", "Demo", "admin", "demo-password")
+	employee := createHTTPTestUser(t, store, "employee", "Employee", "employee", "employee-password")
+	router := NewRouter(Dependencies{DB: db, Config: config.Config{JWTSecret: "test-session-secret", DemoMode: true, DemoProtectedUsernames: "demo"}})
+
+	managerCookie := loginCookie(t, router, "manager", "manager-password")
+	deleteWithCookieExpectStatus(t, router, "/api/v1/users/"+admin.ID, managerCookie, http.StatusForbidden)
+	deleteWithCookieExpectStatus(t, router, "/api/v1/users/"+demo.ID, managerCookie, http.StatusForbidden)
+	deleteWithCookieExpectStatus(t, router, "/api/v1/users/"+manager.ID, managerCookie, http.StatusForbidden)
+
+	adminKey, err := store.CreateAPIKey(context.Background(), domain.APIKey{Name: "admin-key", OwnerUserID: manager.ID, Scopes: `["admin:write"]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteWithHeadersExpectStatus(t, router, "/api/v1/users/"+employee.ID, map[string]string{"Authorization": "Bearer " + adminKey.Plaintext}, http.StatusUnauthorized)
+
+	deleteWithCookieExpectStatus(t, router, "/api/v1/users/"+employee.ID, managerCookie, http.StatusOK)
+	loginExpectStatus(t, router, "employee", "employee-password", http.StatusUnauthorized)
+}
+
 func createHTTPTestUser(t *testing.T, store repository.Store, username, displayName, role, password string) domain.User {
 	t.Helper()
 	hash, err := auth.HashPassword(password)
@@ -352,6 +376,30 @@ func postWithHeadersExpectStatus(t *testing.T, handler http.Handler, path string
 	handler.ServeHTTP(rec, req)
 	if rec.Code != status {
 		t.Fatalf("POST %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func deleteWithCookieExpectStatus(t *testing.T, handler http.Handler, path string, cookie *http.Cookie, status int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("DELETE %s got status %d body %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func deleteWithHeadersExpectStatus(t *testing.T, handler http.Handler, path string, headers map[string]string, status int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != status {
+		t.Fatalf("DELETE %s got status %d body %s", path, rec.Code, rec.Body.String())
 	}
 }
 

@@ -1409,7 +1409,7 @@ export function App() {
             <section className="management-layout"><nav className="management-nav" aria-label="管理模块"><ManagementNavButton active={managementView === 'overview'} label="管理概览" note="查看关键状态" count={state.users.length} onClick={() => setManagementView('overview')} /><ManagementNavButton active={managementView === 'users'} label="用户与权限" note="确认发布身份" count={state.users.length} onClick={() => setManagementView('users')} /><ManagementNavButton active={managementView === 'access'} label="集成访问密钥" note="访问密钥与 scopes" count={state.apiKeys.length} onClick={() => setManagementView('access')} /><ManagementNavButton active={managementView === 'notifications'} label="通知与投递" note="机器人与发送记录" count={state.notificationConfigs.length} onClick={() => setManagementView('notifications')} /><ManagementNavButton active={managementView === 'credentials'} label="连接凭据" note="SSH / Kubeconfig" count={state.credentials.length} onClick={() => setManagementView('credentials')} /></nav>
               <div className="management-workspace">
                 {managementView === 'overview' ? <><section className="surface management-summary"><SectionTitle title="管理状态" meta="CONTROL PLANE" /><div className="management-stat-grid"><ManagementStat label="可用用户" value={state.users.filter((item) => item.enabled !== false).length} note="可登录并参与发布" onClick={() => setManagementView('users')} /><ManagementStat label="启用访问密钥" value={state.apiKeys.filter((item) => item.enabled !== false).length} note="供 CI/CD 和脚本调用" onClick={() => setManagementView('access')} /><ManagementStat label="启用通知" value={state.notificationConfigs.filter((item) => item.enabled !== false).length} note="企业微信机器人" onClick={() => setManagementView('notifications')} /><ManagementStat label="投递异常" value={state.notificationDeliveries.filter((item) => item.status !== 'sent').length} note="查看最近失败原因" onClick={() => setManagementView('notifications')} /></div></section><section className="surface management-guide"><span className="mono-label">日常管理</span><h2>只在需要时打开对应的管理面板。</h2><div><button onClick={() => setManagementView('users')}>新增发布用户 <span>用户与权限 →</span></button><button onClick={() => setManagementView('access')}>创建 CI/CD 访问密钥 <span>集成访问密钥 →</span></button><button onClick={() => setManagementView('notifications')}>测试通知机器人 <span>通知与投递 →</span></button></div></section></> : null}
-                {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('user')}>新建用户</Button></div><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} onOpen={setEditingUser} onDone={() => void refreshUsers()} /></section></> : null}
+                {managementView === 'users' ? <><ManagementSectionHeading eyebrow="IDENTITY" title="用户与权限" description="用户承担发布创建与确认身份。生产环境固定由管理员确认。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('user')}>新建用户</Button></div><section className="surface management-inventory"><SectionTitle title="现有用户" meta="INVENTORY" /><UserList data={state.users} currentUser={currentUser} onOpen={setEditingUser} onDone={() => void refreshAll()} /></section></> : null}
                 {managementView === 'access' ? <><ManagementSectionHeading eyebrow="ACCESS" title="集成访问密钥" description="管理员可管理全部访问密钥；普通用户在个人访问密钥页面仅管理自己的密钥。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('api-key')}>新建访问密钥</Button></div><section className="surface management-inventory"><SectionTitle title="现有访问密钥" meta="INVENTORY" /><APIKeyList data={state.apiKeys} users={state.users} onDone={() => void refreshAll()} /></section></> : null}
                 {managementView === 'notifications' ? <><ManagementSectionHeading eyebrow="NOTIFICATION" title="通知与投递" description="配置企业微信机器人、发送测试消息，并从投递记录定位失败原因。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('notification')}>新建通知配置</Button></div><section className="surface management-inventory"><SectionTitle title="通知配置" meta="INVENTORY" /><NotificationList data={state.notificationConfigs} onTest={() => void refreshAll()} /></section><section className="surface management-deliveries"><SectionTitle title="通知投递记录" meta="DELIVERIES" /><NotificationDeliveryList data={state.notificationDeliveries} configs={state.notificationConfigs} /></section></> : null}
                 {managementView === 'credentials' ? <><ManagementSectionHeading eyebrow="CREDENTIAL" title="连接凭据" description="凭据供 SSH 服务器和 K8s 集群连接引用；Secret 不会在创建后再次展示。" /><div className="infrastructure-create-bar"><Button type="primary" onClick={() => setMgmtCreatingKind('credential')}>新建凭据</Button></div><section className="surface management-inventory"><SectionTitle title="已保存凭据" meta="INVENTORY" /><CredentialList data={state.credentials} servers={state.servers} k8sClusters={state.k8sClusters} onDone={() => void refreshAll()} /></section></> : null}
@@ -2662,12 +2662,21 @@ function UserForm({ onDone }: { onDone: (user: Entity) => void }) {
   );
 }
 
-function UserList({ data, onOpen, onDone }: { data: Entity[]; onOpen: (user: Entity) => void; onDone: () => void }) {
+function UserList({ data, currentUser, onOpen, onDone }: { data: Entity[]; currentUser: Entity | null; onOpen: (user: Entity) => void; onDone: () => void }) {
   const [busyID, setBusyID] = useState('');
   async function setEnabled(item: Entity, enabled: boolean) {
     setBusyID(String(item.id ?? ''));
     try {
       await apiPatch<Entity>(`/api/v1/users/${item.id}`, { enabled });
+      onDone();
+    } finally {
+      setBusyID('');
+    }
+  }
+  async function deleteUser(item: Entity) {
+    setBusyID(String(item.id ?? ''));
+    try {
+      await apiDelete<Entity>(`/api/v1/users/${item.id}`);
       onDone();
     } finally {
       setBusyID('');
@@ -2681,6 +2690,8 @@ function UserList({ data, onOpen, onDone }: { data: Entity[]; onOpen: (user: Ent
         renderItem={(item) => {
           const enabled = item.enabled !== false;
           const protectedUser = isFrontendProtectedUser(item);
+          const deletingSelf = scalarRef(item.id) === scalarRef(currentUser?.id);
+          const canDelete = !protectedUser && !deletingSelf;
           return (
             <div className="data-row">
               <div className="data-main" role="button" onClick={() => onOpen(item)} style={{ cursor: 'pointer' }}>
@@ -2695,6 +2706,11 @@ function UserList({ data, onOpen, onDone }: { data: Entity[]; onOpen: (user: Ent
                 <Button size="small" loading={busyID === item.id} disabled={protectedUser} onClick={() => void setEnabled(item, !enabled)}>
                   {enabled ? '禁用' : '启用'}
                 </Button>
+                <Popconfirm title="删除用户" description="删除后该用户的访问密钥会一并删除，历史发布记录保留。" okText="删除" cancelText="取消" disabled={!canDelete} onConfirm={() => void deleteUser(item)}>
+                  <Button size="small" danger loading={busyID === item.id} disabled={!canDelete}>
+                    删除
+                  </Button>
+                </Popconfirm>
               </Space>
             </div>
           );
@@ -3375,7 +3391,8 @@ function formatActor(actorType: Entity[string], actorID: Entity[string], state: 
   const type = scalarRef(actorType);
   const id = scalarRef(actorID);
   if (type === 'user') {
-    return `用户 ${namedRef(findByID(state.users, id), id, 'display_name')}`;
+    const user = findByID(state.users, id);
+    return user ? `用户 ${namedRef(user, id, 'display_name')}` : `已删除用户 ${shortID(id)}`;
   }
   return `${type ?? 'actor'} ${shortID(id)}`;
 }

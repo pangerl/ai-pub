@@ -846,6 +846,29 @@ UPDATE users SET password_hash = ?, session_version = session_version + 1, updat
 	return err
 }
 
+func (s Store) DeleteUser(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM api_keys WHERE owner_type = 'user' AND owner_id = ?`, id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s Store) CreateAPIKey(ctx context.Context, item domain.APIKey) (APIKeyWithPlaintext, error) {
 	plaintext, err := newAPIKeySecret()
 	if err != nil {
