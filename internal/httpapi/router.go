@@ -147,7 +147,7 @@ type apiError struct {
 }
 
 func writeData(w http.ResponseWriter, r *http.Request, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
+	setJSONResponseHeaders(w)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(response{
 		Data:      data,
@@ -160,12 +160,21 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code string,
 		status = http.StatusNotFound
 		code = "not_found"
 	}
-	w.Header().Set("Content-Type", "application/json")
+	setJSONResponseHeaders(w)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:     apiError{Code: code, Message: err.Error()},
 		RequestID: requestIDFrom(r),
 	})
+}
+
+func setJSONResponseHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Add("Vary", "Authorization")
+	w.Header().Add("Vary", "Cookie")
 }
 
 // parseIntDefault 解析 query 参数为 int，空串或非法时返回默认值。用于分页/时间范围参数。

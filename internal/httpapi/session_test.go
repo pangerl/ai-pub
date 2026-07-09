@@ -61,6 +61,7 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	if meRecorder.Code != http.StatusOK {
 		t.Fatalf("unexpected me response: %d %s", meRecorder.Code, meRecorder.Body.String())
 	}
+	assertNoStoreJSON(t, meRecorder)
 
 	projectRequest := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader([]byte(`{"name":"forbidden","slug":"forbidden"}`)))
 	projectRequest.Header.Set("Content-Type", "application/json")
@@ -120,6 +121,7 @@ func TestSessionLoginProtectsBusinessAPIsAndAdminWrites(t *testing.T) {
 	if invalidBearerRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid bearer got %d: %s", invalidBearerRecorder.Code, invalidBearerRecorder.Body.String())
 	}
+	assertNoStoreJSON(t, invalidBearerRecorder)
 
 	inventoryKeyRequest := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"inventory","scopes":"[\"inventory:read\"]"}`))
 	inventoryKeyRequest.Header.Set("Content-Type", "application/json")
@@ -267,6 +269,32 @@ func loginCookie(t *testing.T, handler http.Handler, username, password string) 
 		t.Fatalf("login %s got status %d body %s", username, rec.Code, rec.Body.String())
 	}
 	return rec.Result().Cookies()[0]
+}
+
+func assertNoStoreJSON(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected no-store cache header, got %q", rec.Header().Get("Cache-Control"))
+	}
+	if rec.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("expected no-cache pragma, got %q", rec.Header().Get("Pragma"))
+	}
+	if rec.Header().Get("Expires") != "0" {
+		t.Fatalf("expected expires 0, got %q", rec.Header().Get("Expires"))
+	}
+	vary := rec.Header().Values("Vary")
+	if !containsHeaderValue(vary, "Authorization") || !containsHeaderValue(vary, "Cookie") {
+		t.Fatalf("expected Vary Authorization and Cookie, got %#v", vary)
+	}
+}
+
+func containsHeaderValue(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func loginExpectStatus(t *testing.T, handler http.Handler, username, password string, status int) {
