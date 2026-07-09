@@ -66,6 +66,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /api/v1/users", withSessionUser(store, deps.Config.JWTSecret, listUsers(store)))
 	mux.HandleFunc("POST /api/v1/users", withAdmin(store, deps.Config.JWTSecret, createSessionUser(store)))
 	mux.HandleFunc("PATCH /api/v1/users/{id}", withAdmin(store, deps.Config.JWTSecret, patchUser(store, deps.Config)))
+	mux.HandleFunc("DELETE /api/v1/users/{id}", withAdminSession(deps.Config.JWTSecret, deleteUser(store, deps.Config)))
 	mux.HandleFunc("POST /api/v1/users/{id}/password", withAdminSession(deps.Config.JWTSecret, resetUserPassword(store, deps.Config)))
 	mux.HandleFunc("GET /api/v1/api-keys", listAPIKeys(store, deps.Config.JWTSecret))
 	mux.HandleFunc("POST /api/v1/api-keys", createAPIKey(store, deps.Config.JWTSecret))

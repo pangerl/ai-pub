@@ -140,6 +140,7 @@ API Key scope：
 | `GET` | `/users` | 用户列表；管理员返回完整字段，普通用户仅返回用户目录（id、username、display_name） |
 | `POST` | `/users` | 创建用户，管理员 |
 | `PATCH` | `/users/{id}` | 更新用户，管理员 |
+| `DELETE` | `/users/{id}` | 删除用户，管理员会话；同步删除该用户归属的 API Key，历史发布记录保留原用户 ID |
 | `GET` | `/api-keys` | API Key 列表；普通用户仅返回自己的 Key，管理员返回全部 |
 | `POST` | `/api-keys` | 创建 API Key；普通用户的归属固定为当前用户 |
 | `PATCH` | `/api-keys/{id}` | 禁用或更新；普通用户只能操作自己的 Key |
